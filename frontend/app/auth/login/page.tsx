@@ -34,32 +34,26 @@ export default function AuthPage() {
     }
   }
 
-  function switchMode(next: Mode) {
-    setMode(next)
-    setError(null)
-    setSuccess(null)
-  }
-
   return (
-    <main className="min-h-screen flex items-center justify-center px-4">
+    <main className="min-h-screen bg-[#0f0f0f] flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-sm">
         {/* Brand */}
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-teal-700">Qwiva</h1>
-          <p className="text-sm text-gray-500 mt-1">Clinical search for physicians</p>
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-white tracking-tight">Qwiva</h1>
+          <p className="text-sm text-[#6b6b6b] mt-2">Kenya's clinical knowledge platform</p>
         </div>
 
         {/* Mode toggle */}
-        <div className="flex mb-6 bg-gray-100 rounded-xl p-1">
+        <div className="flex mb-6 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1">
           {(['login', 'signup'] as Mode[]).map((m) => (
             <button
               key={m}
               type="button"
-              onClick={() => switchMode(m)}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+              onClick={() => { setMode(m); setError(null); setSuccess(null) }}
+              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
                 mode === m
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-[#2a2a2a] text-white'
+                  : 'text-[#6b6b6b] hover:text-[#9a9a9a]'
               }`}
             >
               {m === 'login' ? 'Sign in' : 'Create account'}
@@ -69,46 +63,54 @@ export default function AuthPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white border border-gray-200 rounded-2xl shadow-sm px-6 py-8 space-y-5"
+          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-6 py-7 space-y-4"
         >
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-xs font-medium text-[#9a9a9a] mb-1.5 uppercase tracking-wide">
+              Email
+            </label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+              className="w-full px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-sm text-[#e8e8e8] placeholder-[#4a4a4a] outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20 transition-all"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label className="block text-xs font-medium text-[#9a9a9a] mb-1.5 uppercase tracking-wide">
+              Password
+            </label>
             <input
               type="password"
               required
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+              className="w-full px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-sm text-[#e8e8e8] placeholder-[#4a4a4a] outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20 transition-all"
             />
           </div>
 
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-lg">
+              {error}
+            </p>
           )}
           {success && (
-            <p className="text-sm text-teal-700 bg-teal-50 px-3 py-2 rounded-lg">{success}</p>
+            <p className="text-xs text-teal-400 bg-teal-500/10 border border-teal-500/20 px-3 py-2 rounded-lg">
+              {success}
+            </p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 text-sm font-semibold text-white bg-teal-500 hover:bg-teal-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors mt-2"
           >
             {loading
-              ? mode === 'login' ? 'Signing in…' : 'Creating account…'
-              : mode === 'login' ? 'Sign in' : 'Create account'}
+              ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
+              : (mode === 'login' ? 'Sign in' : 'Create account')}
           </button>
         </form>
       </div>

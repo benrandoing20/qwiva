@@ -5,14 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from backend.auth import verify_token
+from backend.config import get_settings
 from backend.models import SearchRequest, UserProfile
 from backend.rag import rag
+
+_settings = get_settings()
 
 app = FastAPI(title="Qwiva API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[_settings.frontend_url, "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

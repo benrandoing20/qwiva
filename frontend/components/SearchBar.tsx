@@ -18,20 +18,26 @@ export default function SearchBar({ onSearch, isLoading }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="flex gap-2 p-1 bg-white border border-gray-200 rounded-xl shadow-sm focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent transition-all">
+      <div className="flex items-center gap-2 px-4 py-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl focus-within:border-teal-500/50 focus-within:ring-1 focus-within:ring-teal-500/20 transition-all">
         <input
           ref={inputRef}
           type="text"
           placeholder="Ask a clinical question…"
           disabled={isLoading}
-          className="flex-1 px-4 py-3 text-gray-800 placeholder-gray-400 bg-transparent outline-none text-base disabled:opacity-60"
+          className="flex-1 bg-transparent text-[#e8e8e8] placeholder-[#4a4a4a] text-base outline-none disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={isLoading}
-          className="px-5 py-2.5 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 active:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-teal-500 hover:bg-teal-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors"
         >
-          {isLoading ? 'Searching…' : 'Search'}
+          {isLoading ? (
+            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
+          )}
         </button>
       </div>
     </form>
