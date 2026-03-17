@@ -15,11 +15,14 @@ class Settings(BaseSettings):
     nvidia_api_key: str
     nvidia_api_base: str = "https://inference-api.nvidia.com/v1/"
     embedding_model: str = "azure/openai/text-embedding-3-small"
-    litellm_model: str = "openai/aws/anthropic/bedrock-claude-opus-4-6"
+    litellm_model: str = "openai/aws/anthropic/bedrock-claude-sonnet-4-6"
 
     # Reranker
     rerank_model: str = "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2"
     rerank_base_url: str = "https://inference-api.nvidia.com/v1/rerank"
+
+    # Deployment
+    frontend_url: str = "http://localhost:3000"
 
     # Search tuning
     retrieval_top_k: int = 20
