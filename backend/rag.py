@@ -2,15 +2,13 @@
 Core RAG pipeline for Qwiva clinical search.
 
 Pipeline (per query):
-  1. Embed query          → text-embedding-3-small via NVIDIA hub
-  2. Parallel retrieval   → vector search + full-text search via Supabase
-  3. Merge & deduplicate  → Reciprocal Rank Fusion
-  4. Rerank               → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 20 → top 5
-  5. Generate             → bedrock-claude-sonnet-4-6 via LiteLLM
-  6. Stream               → SSE: status → citations → token → done
+  1. Embed query        → text-embedding-3-small via NVIDIA hub
+  2. Hybrid retrieval   → dynamic_hybrid_search_db RPC (vector + FTS, RRF in DB)
+  3. Rerank             → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 20 → top 5
+  4. Generate           → bedrock-claude-sonnet-4-6 via LiteLLM
+  5. Stream             → SSE: status → citations → token → done
 """
 
-import asyncio
 import json
 import os
 from collections.abc import AsyncGenerator
@@ -136,13 +134,7 @@ class QwivaRAG:
         """
         yield _sse("status", {"message": "Searching guidelines…"})
         embedding = await self._embed(query)
-
-        vec_task = self._vector_search(embedding)
-        fts_task = self._fts_search(query)
-        vec_results, fts_results = await asyncio.gather(vec_task, fts_task)
-
-        merged = _reciprocal_rank_fusion(vec_results, fts_results, k=self._settings.rrf_k)
-        top_chunks = merged[: self._settings.retrieval_top_k]
+        top_chunks = await self._hybrid_search(query, embedding)
 
         yield _sse("status", {"message": "Ranking results…"})
         chunks = await self._rerank(query, top_chunks)
@@ -163,16 +155,7 @@ class QwivaRAG:
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
         embedding = await self._embed(query)
-        vec_task = self._vector_search(embedding)
-        fts_task = self._fts_search(query)
-        vec_results, fts_results = await asyncio.gather(vec_task, fts_task)
-
-        merged = _reciprocal_rank_fusion(
-            vec_results,
-            fts_results,
-            k=self._settings.rrf_k,
-        )
-        top_chunks = merged[: self._settings.retrieval_top_k]
+        top_chunks = await self._hybrid_search(query, embedding)
         return await self._rerank(query, top_chunks)
 
     async def _embed(self, query: str) -> list[float]:
@@ -182,27 +165,25 @@ class QwivaRAG:
         )
         return response.data[0].embedding
 
-    async def _vector_search(self, embedding: list[float]) -> list[dict]:
+    async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
+        """Single DB round-trip: vector + FTS with RRF merged in Supabase."""
         db = await get_db()
         response = await db.rpc(
-            "match_documents",
+            "dynamic_hybrid_search_db",
             {
                 "query_embedding": embedding,
+                "query_text": query,
+                "dense_weight": self._settings.dense_weight,
+                "sparse_weight": self._settings.sparse_weight,
+                "ilike_weight": 0.0,
+                "fuzzy_weight": 0.0,
+                "rrf_k": self._settings.rrf_k,
                 "match_count": self._settings.retrieval_top_k,
+                "filter": {},
+                "fuzzy_threshold": 0.3,
             },
         ).execute()
-        return response.data or []
-
-    async def _fts_search(self, query: str) -> list[dict]:
-        db = await get_db()
-        response = (
-            await db.from_("documents_v2")
-            .select("id, content, metadata")
-            .limit(self._settings.retrieval_top_k)
-            .filter("fts", "wfts", query)
-            .execute()
-        )
-        return response.data or []
+        return [_row_to_chunk(r) for r in (response.data or [])]
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
@@ -321,30 +302,6 @@ def _row_to_chunk(row: dict) -> Chunk:
         chunk_index=int(meta.get("chunk_index", 0)),
     )
 
-
-def _reciprocal_rank_fusion(
-    vec_results: list[dict],
-    fts_results: list[dict],
-    k: int = 60,
-) -> list[Chunk]:
-    """
-    Merge two ranked lists using Reciprocal Rank Fusion.
-    Score(d) = Σ 1 / (k + rank)   for each list that contains d.
-    Higher score = better.
-    """
-    scores: dict[str, tuple[float, Chunk]] = {}
-
-    for rank, row in enumerate(vec_results):
-        chunk = _row_to_chunk(row)
-        prev_score = scores[chunk.id][0] if chunk.id in scores else 0.0
-        scores[chunk.id] = (prev_score + 1 / (k + rank + 1), chunk)
-
-    for rank, row in enumerate(fts_results):
-        chunk = _row_to_chunk(row)
-        prev_score = scores[chunk.id][0] if chunk.id in scores else 0.0
-        scores[chunk.id] = (prev_score + 1 / (k + rank + 1), chunk)
-
-    return [chunk for _, chunk in sorted(scores.values(), key=lambda x: x[0], reverse=True)]
 
 
 def _build_citations(chunks: list[Chunk]) -> list[Citation]:
