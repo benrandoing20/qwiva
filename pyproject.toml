@@ -20,6 +20,14 @@ dev = [
     "black==24.10.0",
     "ruff==0.7.0",
 ]
+eval = [
+    "ragas>=0.1.0",
+    "deepeval>=0.21.0",
+    "datasets>=2.0.0",
+    "pandas>=2.0.0",
+    "langchain-community>=0.0.20",
+    "langchain-openai>=0.0.5",
+]
 
 [build-system]
 requires = ["hatchling"]
