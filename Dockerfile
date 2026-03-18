@@ -2,17 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install uv
 RUN pip install uv
 
-# Copy dependency manifest first for layer caching
 COPY pyproject.toml .
-
-# Install production dependencies (no dev extras)
-RUN uv pip install --system --no-cache -e .
-
-# Copy application code
 COPY backend/ ./backend/
+
+RUN uv pip install --system --no-cache .
 
 ENV PYTHONUNBUFFERED=1
 
