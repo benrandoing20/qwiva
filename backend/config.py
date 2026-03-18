@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 20
     rerank_top_n: int = 5
     rrf_k: int = 60
+    dense_weight: float = 0.6   # must sum to 1.0 with sparse_weight
+    sparse_weight: float = 0.4
 
 
 @lru_cache
