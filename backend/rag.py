@@ -2,16 +2,17 @@
 Core RAG pipeline for Qwiva clinical search.
 
 Pipeline (per query):
-  1. Embed query          → OpenAI text-embedding-3-large
+  1. Embed query          → text-embedding-3-small via NVIDIA hub
   2. Parallel retrieval   → vector search + full-text search via Supabase
   3. Merge & deduplicate  → Reciprocal Rank Fusion
-  4. Rerank               → Cohere rerank-english-v3.0, top 20 → top 5
-  5. Generate             → gpt-4o via LiteLLM, grounded answer with citations
-  6. Stream               → SSE: citations event → token events → done event
+  4. Rerank               → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 20 → top 5
+  5. Generate             → bedrock-claude-sonnet-4-6 via LiteLLM
+  6. Stream               → SSE: status → citations → token → done
 """
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from functools import cached_property
@@ -23,6 +24,17 @@ from openai import AsyncOpenAI
 from backend.config import Settings, get_settings
 from backend.db import get_db
 from backend.models import Citation, CitationsPayload, SearchResult
+
+
+def _configure_langfuse(settings: Settings) -> None:
+    """Enable LiteLLM → Langfuse tracing if keys are present."""
+    if not (settings.langfuse_public_key and settings.langfuse_secret_key):
+        return
+    os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
+    os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
+    os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+    if "langfuse" not in (litellm.success_callback or []):
+        litellm.success_callback = ["langfuse"]
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +100,7 @@ class Chunk:
 class QwivaRAG:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
+        _configure_langfuse(self._settings)
 
     # ------------------------------------------------------------------
     # Public API
@@ -139,7 +152,7 @@ class QwivaRAG:
         yield _sse("citations", CitationsPayload(citations=citations, evidence_grade=evidence_grade).model_dump())
 
         yield _sse("status", {"message": "Generating answer…"})
-        async for token in self._generate_stream(query, chunks):
+        async for token in self._generate_stream(query, chunks, user_id=user_id):
             yield _sse("token", {"token": token})
 
         yield _sse("done", {})
@@ -219,7 +232,7 @@ class QwivaRAG:
     # ------------------------------------------------------------------
 
     async def _generate_stream(
-        self, query: str, chunks: list[Chunk]
+        self, query: str, chunks: list[Chunk], user_id: str = ""
     ) -> AsyncGenerator[str, None]:
         # Assign the same deduplicated indices used in citations
         seen: dict[str, int] = {}
@@ -257,6 +270,12 @@ class QwivaRAG:
             model=self._settings.litellm_model,
             messages=messages,
             stream=True,
+            metadata={
+                "trace_name": "qwiva_search",
+                "tags": ["search"],
+                "trace_user_id": user_id,
+                "trace_metadata": {"query": query, "num_sources": len(chunks)},
+            },
             **extra,
         )
 

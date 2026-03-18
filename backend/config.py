@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     rerank_model: str = "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2"
     rerank_base_url: str = "https://inference-api.nvidia.com/v1/rerank"
 
+    # Langfuse observability (optional — tracing disabled if keys not set)
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     # Deployment
     frontend_url: str = "http://localhost:3000"
 
