@@ -6,12 +6,19 @@ from fastapi.responses import StreamingResponse
 
 from backend.auth import verify_token
 from backend.config import get_settings
+from backend.db import get_db
 from backend.models import SearchRequest, UserProfile
 from backend.rag import rag
 
 _settings = get_settings()
 
 app = FastAPI(title="Qwiva API", version="0.1.0")
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    """Pre-warm the Supabase connection so the first query doesn't pay init cost."""
+    await get_db()
 
 app.add_middleware(
     CORSMiddleware,

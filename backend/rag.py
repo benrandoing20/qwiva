@@ -164,21 +164,21 @@ class QwivaRAG:
         return response.data[0].embedding
 
     async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
-        """Single DB round-trip: vector + FTS with RRF merged in Supabase."""
+        """Single DB round-trip: vector + FTS with RRF merged in Supabase.
+
+        Uses a static SQL function (hybrid_search) so Postgres can cache the
+        query plan — faster than dynamic_hybrid_search_db which re-plans every call.
+        """
         db = await get_db()
         response = await db.rpc(
-            "dynamic_hybrid_search_db",
+            "hybrid_search",
             {
                 "query_embedding": embedding,
                 "query_text": query,
-                "dense_weight": self._settings.dense_weight,
-                "sparse_weight": self._settings.sparse_weight,
-                "ilike_weight": 0.0,
-                "fuzzy_weight": 0.0,
-                "rrf_k": self._settings.rrf_k,
                 "match_count": self._settings.retrieval_top_k,
-                "filter": {},
-                "fuzzy_threshold": 0.3,
+                "rrf_k": self._settings.rrf_k,
+                "dense_w": self._settings.dense_weight,
+                "sparse_w": self._settings.sparse_weight,
             },
         ).execute()
         return [_row_to_chunk(r) for r in (response.data or [])]
