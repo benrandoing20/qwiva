@@ -155,6 +155,36 @@ async def remove_conversation(
 # ---------------------------------------------------------------------------
 
 
+def _msg_to_history(m: dict) -> dict:
+    """Convert a DB message row to an LLM history entry.
+
+    For assistant messages, append citation metadata as plain text so the model
+    can answer follow-up questions like "describe source 1" without hallucinating.
+    """
+    import json as _json
+
+    content = m["content"] or ""
+    if m["role"] == "assistant" and m.get("citations"):
+        raw = m["citations"]
+        try:
+            cits = _json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except Exception:
+            cits = []
+        if cits:
+            lines = []
+            for c in cits:
+                line = f"[{c['index']}] {c['guideline_title']}"
+                if c.get("publisher"):
+                    line += f" — {c['publisher']}"
+                if c.get("year"):
+                    line += f" · {c['year']}"
+                if c.get("excerpt"):
+                    line += f"\n    Excerpt: {c['excerpt']}"
+                lines.append(line)
+            content = f"{content}\n\nReferenced sources:\n" + "\n".join(lines)
+    return {"role": m["role"], "content": content}
+
+
 @app.post("/search/stream")
 async def search_stream(
     body: SearchRequest,
@@ -182,17 +212,32 @@ async def search_stream(
             import json as _json
             yield f"event: conversation\ndata: {_json.dumps({'conversation_id': conversation_id, 'user_message_id': user_message_id})}\n\n"
 
-            # Run RAG pipeline — collect tokens while streaming to client
+            # Build conversation history (active path minus the just-added user message).
+            # For assistant turns, append citation metadata so follow-up questions
+            # ("describe source 1") can be answered accurately from context.
+            path = await get_active_path(conversation_id)
+            history = [_msg_to_history(m) for m in path[:-1]]
+
+            # Classify: guideline lookup needed, or conversational reply?
+            mode = await rag.classify(body.query, history)
+
+            # Stream response — both generators yield SSE-formatted strings
             tokens: list[str] = []
             citations = []
             evidence_grade = ""
 
-            async for chunk in rag.stream_search(body.query, user.user_id):
-                # Skip the RAG-level done — main.py emits done with assistant_message_id
+            generator = (
+                rag.stream_chat(body.query, user.user_id, history)
+                if mode == "chat"
+                else rag.stream_search(body.query, user.user_id, history)
+            )
+
+            async for chunk in generator:
+                # Skip the inner done — main.py emits done with assistant_message_id
                 if chunk.startswith("event: done"):
                     continue
                 yield chunk
-                # Parse SSE chunks to capture citations for persistence
+                # Parse SSE to capture citations and tokens for persistence
                 if chunk.startswith("event: citations"):
                     data_line = chunk.split("\ndata: ", 1)[-1].strip()
                     try:
