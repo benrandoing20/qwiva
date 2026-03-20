@@ -16,10 +16,12 @@ export interface TokenPayload {
 }
 
 export type SSEEvent =
+  | { event: 'conversation'; data: { conversation_id: string; user_message_id: string } }
   | { event: 'status'; data: { message: string } }
   | { event: 'citations'; data: CitationsPayload }
   | { event: 'token'; data: TokenPayload }
-  | { event: 'done'; data: Record<string, never> }
+  | { event: 'done'; data: { assistant_message_id: string } }
+  | { event: 'title'; data: { conversation_id: string; title: string } }
   | { event: 'error'; data: { detail: string } }
 
 export type SearchStatus = 'idle' | 'searching' | 'streaming' | 'done' | 'error'
@@ -31,4 +33,23 @@ export interface SearchState {
   citations: Citation[]
   evidence_grade: string
   error: string | null
+}
+
+export interface Conversation {
+  id: string
+  title: string | null
+  title_generated: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations?: Citation[]
+  evidence_grade?: string
+  isStreaming?: boolean
+  isError?: boolean
+  statusMessage?: string
 }
