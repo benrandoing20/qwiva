@@ -4,23 +4,55 @@ Qwiva RAG Eval Harness
 Usage:
     python -m evals.run_evals
     python -m evals.run_evals --n 5 --skip-ragas --skip-deepeval
+    python -m evals.run_evals --skip-pipeline --report evals/reports/20260319T123822Z.json
 
 Options:
     --n N              Run only first N questions
+    --skip-pipeline    Skip question execution; reload results from --report JSON
     --skip-ragas       Skip RAGAS model-based metrics
     --skip-deepeval    Skip DeepEval metrics
+    --report PATH      Existing report JSON to reload when using --skip-pipeline
     --dataset PATH     Path to questions JSON (default: evals/datasets/clinical_questions.json)
 """
 
 import argparse
 import asyncio
+import json
 
 from evals.config import EvalConfig
 from evals.dataset import load_dataset
 from evals.metrics.clinical import compute_clinical
 from evals.metrics.latency import compute_latency
-from evals.pipeline import run_question
+from evals.pipeline import PipelineResult, run_question
 from evals.report import save_report
+
+
+def _load_pipeline_results_from_report(report_path: str, questions) -> list[PipelineResult]:
+    """Reconstruct PipelineResult stubs from a saved report JSON for re-running judges only."""
+    import pathlib
+
+    data = json.loads(pathlib.Path(report_path).read_text())
+    q_map = {q.question: q for q in questions}
+    results = []
+    for pq in data["per_question"]:
+        q = q_map.get(pq["question"])
+        results.append(
+            PipelineResult(
+                question=pq["question"],
+                retrieved_chunks=[],
+                reranked_chunks=[None] * pq["n_reranked"],
+                answer=pq.get("answer_preview", ""),
+                citations=[None] * pq["n_citations"],
+                contexts=[],
+                embed_ms=pq["latency_ms"]["embed"],
+                retrieval_ms=pq["latency_ms"]["retrieval"],
+                rerank_ms=pq["latency_ms"]["rerank"],
+                ttft_ms=pq["latency_ms"]["ttft"],
+                total_ms=pq["latency_ms"]["total"],
+                error=pq.get("error"),
+            )
+        )
+    return results
 
 
 async def main(args: argparse.Namespace) -> None:
@@ -34,20 +66,24 @@ async def main(args: argparse.Namespace) -> None:
     if config.n_questions:
         questions = questions[: config.n_questions]
 
-    print(f"[eval] Running {len(questions)} questions...")
-    print(
-        f"[eval] RAGAS={'on' if config.run_ragas else 'off'} "
-        f"| DeepEval={'on' if config.run_deepeval else 'off'}\n"
-    )
-
-    # Run all questions
-    pipeline_results = []
-    for i, q in enumerate(questions, 1):
-        print(f"  [{i}/{len(questions)}] {q.question[:70]}...", end=" ", flush=True)
-        result = await run_question(q.question)
-        pipeline_results.append(result)
-        status = f"ERROR {result.error[:40]}" if result.error else f"OK {result.total_ms:.0f}ms"
-        print(status)
+    if args.skip_pipeline:
+        if not args.report:
+            raise SystemExit("--skip-pipeline requires --report <path>")
+        print(f"[eval] Skipping pipeline — reloading results from {args.report}")
+        pipeline_results = _load_pipeline_results_from_report(args.report, questions)
+    else:
+        print(f"[eval] Running {len(questions)} questions...")
+        print(
+            f"[eval] RAGAS={'on' if config.run_ragas else 'off'} "
+            f"| DeepEval={'on' if config.run_deepeval else 'off'}\n"
+        )
+        pipeline_results = []
+        for i, q in enumerate(questions, 1):
+            print(f"  [{i}/{len(questions)}] {q.question[:70]}...", end=" ", flush=True)
+            result = await run_question(q.question)
+            pipeline_results.append(result)
+            status = f"ERROR {result.error[:40]}" if result.error else f"OK {result.total_ms:.0f}ms"
+            print(status)
 
     # Compute metrics
     latency = compute_latency(pipeline_results)
@@ -96,8 +132,10 @@ async def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=None)
+    parser.add_argument("--skip-pipeline", action="store_true")
     parser.add_argument("--skip-ragas", action="store_true")
     parser.add_argument("--skip-deepeval", action="store_true")
+    parser.add_argument("--report", default=None, help="Existing report JSON (required with --skip-pipeline)")
     parser.add_argument("--dataset", default="evals/datasets/clinical_questions.json")
     args = parser.parse_args()
     asyncio.run(main(args))
