@@ -1,6 +1,7 @@
+import json
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 
 class SearchRequest(BaseModel):
     query: str
+    conversation_id: str | None = None   # omit to start a new conversation
+    parent_message_id: str | None = None  # omit to append at current leaf
 
 
 class Citation(BaseModel):
@@ -47,6 +50,48 @@ SSEEventType = Literal["citations", "token", "done", "error"]
 class SSEEvent(BaseModel):
     event: SSEEventType
     data: CitationsPayload | TokenPayload | dict
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+# ---------------------------------------------------------------------------
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str | None
+    title_generated: bool
+    created_at: str
+    updated_at: str
+
+
+class MessageOut(BaseModel):
+    id: str
+    parent_id: str | None
+    selected_child_id: str | None
+    role: str
+    content: str
+    citations: list[Citation] | None = None
+    evidence_grade: str | None = None
+    branch_index: int
+    created_at: str
+
+    @field_validator("citations", mode="before")
+    @classmethod
+    def parse_citations(cls, v: object) -> object:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return None
+        return v
+
+
+class SiblingOut(BaseModel):
+    id: str
+    branch_index: int
+    content: str
+    created_at: str
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,122 @@
+[
+  {
+    "id": "q01",
+    "question": "What is the first-line treatment for uncomplicated malaria in adults in Kenya?",
+    "ground_truth": "The first-line treatment for uncomplicated malaria in adults in Kenya is Artemether-Lumefantrine (AL), given as a fixed-dose combination over three days (six doses). Each dose is taken twice daily with food or a fatty drink to improve absorption. This regimen is recommended in the Kenya National Guidelines for the Management of Malaria.",
+    "expected_source_keywords": ["malaria", "Kenya"],
+    "tags": ["malaria", "treatment", "adult", "first-line"],
+    "difficulty": 1
+  },
+  {
+    "id": "q02",
+    "question": "What is the correct IV artesunate dosing for severe malaria in adults?",
+    "ground_truth": "For severe malaria in adults, IV artesunate is given at 2.4 mg/kg body weight at 0, 12, and 24 hours, then once daily thereafter until the patient can tolerate oral therapy. Treatment should be continued for a minimum of 24 hours before switching to a full course of an effective oral antimalarial. Artesunate is preferred over quinine for severe malaria due to its superior efficacy and safety profile.",
+    "expected_source_keywords": ["malaria", "severe"],
+    "tags": ["malaria", "severe", "artesunate", "IV", "adult"],
+    "difficulty": 2
+  },
+  {
+    "id": "q03",
+    "question": "How should postpartum haemorrhage be initially managed?",
+    "ground_truth": "Initial management of postpartum haemorrhage (PPH) includes immediate uterine massage to stimulate contraction, administration of oxytocin 10 IU IM or IV as the first-line uterotonic, and assessment of the cause using the four T's (Tone, Trauma, Tissue, Thrombin). Intravenous access should be established with two large-bore cannulas, and crystalloid fluid resuscitation commenced. If oxytocin fails, second-line uterotonics such as misoprostol or ergometrine should be used.",
+    "expected_source_keywords": ["postpartum", "haemorrhage", "obstetric"],
+    "tags": ["obstetrics", "PPH", "haemorrhage", "emergency"],
+    "difficulty": 2
+  },
+  {
+    "id": "q04",
+    "question": "What antiretroviral regimen is recommended for HIV-positive pregnant women in Kenya?",
+    "ground_truth": "HIV-positive pregnant women in Kenya should receive a tenofovir-based triple ARV regimen for life (Option B+), regardless of CD4 count or clinical stage. The preferred first-line regimen is Tenofovir Disoproxil Fumarate (TDF) + Lamivudine (3TC) + Efavirenz (EFV) as a once-daily fixed-dose combination. This regimen also prevents mother-to-child transmission and is continued postpartum.",
+    "expected_source_keywords": ["ARV", "HIV", "PMTCT", "pregnancy"],
+    "tags": ["HIV", "pregnancy", "ARV", "PMTCT", "Option B+"],
+    "difficulty": 2
+  },
+  {
+    "id": "q05",
+    "question": "What are the criteria for diagnosing severe acute malnutrition in children under 5?",
+    "ground_truth": "Severe acute malnutrition (SAM) in children under 5 is diagnosed by any one of the following: weight-for-height Z-score less than -3 (below -3SD), mid-upper arm circumference (MUAC) less than 115 mm in children 6-59 months, or the presence of bilateral pitting oedema. SAM requires urgent therapeutic feeding and treatment of complications. Children with medical complications should be admitted to an inpatient therapeutic feeding centre.",
+    "expected_source_keywords": ["malnutrition", "nutrition", "SAM"],
+    "tags": ["nutrition", "SAM", "paediatric", "under-5"],
+    "difficulty": 1
+  },
+  {
+    "id": "q06",
+    "question": "What is the standard treatment regimen for new pulmonary tuberculosis in adults?",
+    "ground_truth": "New pulmonary tuberculosis in adults is treated with the standard short-course regimen: 2 months of Isoniazid (H), Rifampicin (R), Pyrazinamide (Z), and Ethambutol (E) in the intensive phase (2HRZE), followed by 4 months of Isoniazid and Rifampicin in the continuation phase (4HR). All doses are given daily and supervised under directly observed therapy (DOT). Pyridoxine (vitamin B6) is co-administered with isoniazid to prevent peripheral neuropathy.",
+    "expected_source_keywords": ["tuberculosis", "TB"],
+    "tags": ["TB", "tuberculosis", "treatment", "adult"],
+    "difficulty": 1
+  },
+  {
+    "id": "q07",
+    "question": "What is the immediate management of eclampsia?",
+    "ground_truth": "Immediate management of eclampsia includes securing the airway, placing the patient in the left lateral position, and administering magnesium sulphate as first-line anticonvulsant therapy (4 g IV loading dose over 20 minutes, followed by 1 g/hour IV maintenance). Antihypertensive therapy should be initiated if systolic BP is 160 mmHg or greater, using hydralazine or labetalol. Delivery should be expedited after maternal stabilisation, regardless of gestational age.",
+    "expected_source_keywords": ["eclampsia", "obstetric", "hypertension", "pregnancy"],
+    "tags": ["eclampsia", "obstetrics", "emergency", "seizure", "pregnancy"],
+    "difficulty": 3
+  },
+  {
+    "id": "q08",
+    "question": "What is the recommended gentamicin dosing for neonatal sepsis?",
+    "ground_truth": "For neonatal sepsis, gentamicin is dosed at 5 mg/kg IV or IM once daily for neonates up to 7 days old, and 7.5 mg/kg once daily for neonates 8 days and older. Gentamicin is used in combination with ampicillin as first-line treatment for neonatal sepsis. Renal function should be monitored, and trough levels checked if treatment extends beyond 5 days. Duration of treatment is typically 7-10 days for uncomplicated sepsis.",
+    "expected_source_keywords": ["neonatal", "sepsis", "newborn"],
+    "tags": ["neonatal", "sepsis", "gentamicin", "antibiotic", "paediatric"],
+    "difficulty": 2
+  },
+  {
+    "id": "q09",
+    "question": "At what blood pressure threshold should antihypertensive treatment be initiated in pregnancy?",
+    "ground_truth": "Antihypertensive treatment should be initiated in pregnancy when systolic blood pressure is 150 mmHg or greater, or diastolic blood pressure is 100 mmHg or greater (severe hypertension). For women with chronic hypertension in pregnancy, treatment is recommended when blood pressure reaches 140/90 mmHg or higher. Methyldopa is the preferred oral antihypertensive in pregnancy; nifedipine and labetalol are acceptable alternatives. ACE inhibitors and ARBs are contraindicated in pregnancy.",
+    "expected_source_keywords": ["hypertension", "pregnancy", "obstetric"],
+    "tags": ["hypertension", "pregnancy", "antihypertensive", "obstetrics"],
+    "difficulty": 2
+  },
+  {
+    "id": "q10",
+    "question": "How is oral rehydration solution (ORS) prepared at home, and what is its composition?",
+    "ground_truth": "Standard WHO low-osmolarity ORS contains 2.6 g sodium chloride, 2.9 g trisodium citrate, 1.5 g potassium chloride, and 13.5 g glucose per litre of clean water, providing an osmolarity of 245 mOsm/L. For home-prepared solution when sachets are unavailable, one level teaspoon of salt and eight level teaspoons of sugar are dissolved in one litre of clean water. ORS should be given in small, frequent sips and continued until diarrhoea stops and normal hydration is restored.",
+    "expected_source_keywords": ["diarrhoea", "ORS", "rehydration"],
+    "tags": ["diarrhoea", "ORS", "rehydration", "paediatric", "dehydration"],
+    "difficulty": 1
+  },
+  {
+    "id": "q11",
+    "question": "What is the recommended antibiotic for community-acquired pneumonia in adults?",
+    "ground_truth": "For community-acquired pneumonia (CAP) in adults not requiring ICU admission, amoxicillin is the first-line antibiotic for outpatient or ward treatment of non-severe pneumonia in Kenya. For patients with moderate-to-severe CAP requiring hospitalisation, benzylpenicillin IV plus doxycycline covers typical and atypical organisms. Azithromycin is an alternative for penicillin-allergic patients. Duration of treatment is typically 5-7 days for non-severe and 7-10 days for severe CAP.",
+    "expected_source_keywords": ["pneumonia", "respiratory", "antibiotic"],
+    "tags": ["pneumonia", "CAP", "antibiotic", "adult", "respiratory"],
+    "difficulty": 2
+  },
+  {
+    "id": "q12",
+    "question": "When should insulin be initiated in a patient with type 2 diabetes in Kenya?",
+    "ground_truth": "Insulin should be initiated in type 2 diabetes when HbA1c remains above 9% (or fasting blood glucose above 15 mmol/L) despite maximal oral therapy, when oral agents are contraindicated (e.g., renal failure, hepatic impairment), during acute illness, perioperative periods, or pregnancy. Basal insulin (intermediate NPH insulin or long-acting insulin analogue) is the preferred starting regimen. Initial dose is typically 0.1-0.2 units/kg/day at bedtime, titrated by 2 units every 3 days targeting a fasting glucose of 4-7 mmol/L.",
+    "expected_source_keywords": ["diabetes", "insulin"],
+    "tags": ["diabetes", "T2DM", "insulin", "endocrine"],
+    "difficulty": 2
+  },
+  {
+    "id": "q13",
+    "question": "How should status epilepticus be managed in an adult?",
+    "ground_truth": "Status epilepticus in adults should be managed in a stepwise manner: secure airway and give oxygen, establish IV access, and give lorazepam 4 mg IV (or diazepam 10 mg IV if lorazepam unavailable) as first-line benzodiazepine within 5 minutes. If seizures persist after 10 minutes, give phenytoin 18 mg/kg IV at a rate no faster than 50 mg/min, or phenobarbitone 15 mg/kg IV. Refractory status epilepticus requires ICU admission with anaesthetic agents. Check blood glucose immediately and treat hypoglycaemia.",
+    "expected_source_keywords": ["epilepsy", "seizure", "neurology"],
+    "tags": ["status epilepticus", "seizure", "neurology", "emergency", "adult"],
+    "difficulty": 3
+  },
+  {
+    "id": "q14",
+    "question": "When and how should ARV prophylaxis be initiated in an HIV-exposed infant for PMTCT?",
+    "ground_truth": "HIV-exposed infants should receive nevirapine (NVP) prophylaxis starting within 6-12 hours of birth, regardless of the mother's ARV status. For infants at high risk of HIV acquisition (mothers who received less than 4 weeks of ART, or are identified late in pregnancy), dual prophylaxis with nevirapine plus zidovudine (AZT) is recommended for 6 weeks. Standard-risk infants receive nevirapine alone for 6 weeks. All HIV-exposed infants should be tested by HIV DNA PCR at 6 weeks.",
+    "expected_source_keywords": ["PMTCT", "HIV", "infant", "ARV"],
+    "tags": ["PMTCT", "HIV", "nevirapine", "infant", "neonatal"],
+    "difficulty": 2
+  },
+  {
+    "id": "q15",
+    "question": "What are the criteria for blood transfusion in a patient with anaemia?",
+    "ground_truth": "Blood transfusion in anaemia is indicated when haemoglobin is below 7 g/dL in a clinically stable patient, or when haemoglobin is 7-10 g/dL with evidence of haemodynamic compromise, symptomatic anaemia (dyspnoea at rest, angina), or ongoing blood loss. In children with severe malaria, transfusion is indicated at haemoglobin below 5 g/dL or haematocrit below 15%. Packed red cells are preferred over whole blood; a typical adult dose is 2-3 units with reassessment after each unit. Transfusion should be avoided in compensated chronic anaemia unless symptomatic.",
+    "expected_source_keywords": ["transfusion", "anaemia", "blood"],
+    "tags": ["transfusion", "anaemia", "haemoglobin", "adult", "paediatric"],
+    "difficulty": 2
+  }
+]

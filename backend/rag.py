@@ -3,21 +3,29 @@ Core RAG pipeline for Qwiva clinical search.
 
 Pipeline (per query):
   1. Embed query        → text-embedding-3-small via NVIDIA hub
-  2. Hybrid retrieval   → dynamic_hybrid_search_db RPC (vector + FTS, RRF in DB)
-  3. Rerank             → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 20 → top 5
+  2. Hybrid retrieval   → Qdrant vector search + Supabase FTS, Python RRF merge
+  3. Rerank             → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 12 → top 5
   4. Generate           → bedrock-claude-sonnet-4-6 via LiteLLM
   5. Stream             → SSE: status → citations → token → done
 """
 
+import asyncio
 import json
+import logging
+import math
 import os
+import time
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 
 import httpx
 import litellm
 from openai import AsyncOpenAI
+from qdrant_client import AsyncQdrantClient
+
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 
 from backend.config import Settings, get_settings
 from backend.db import get_db
@@ -89,6 +97,82 @@ class Chunk:
 
 
 # ---------------------------------------------------------------------------
+# Semantic cache
+# ---------------------------------------------------------------------------
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    mag_a = math.sqrt(sum(x * x for x in a))
+    mag_b = math.sqrt(sum(x * x for x in b))
+    return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
+
+
+@dataclass
+class _CachedResult:
+    embedding: list[float]
+    chunks: list["Chunk"]
+    citations: list["Citation"]
+    evidence_grade: str
+    answer: str
+    ts: float = field(default_factory=time.time)
+
+
+class _SemanticCache:
+    """In-process LRU cache keyed by query embedding cosine similarity."""
+
+    def __init__(self, max_size: int = 512, ttl: float = 86_400.0, threshold: float = 0.92) -> None:
+        self._store: OrderedDict[int, _CachedResult] = OrderedDict()
+        self._max_size = max_size
+        self._ttl = ttl
+        self._threshold = threshold
+
+    def lookup(self, embedding: list[float]) -> _CachedResult | None:
+        now = time.time()
+        best_score = 0.0
+        best_entry: _CachedResult | None = None
+        stale = []
+
+        for key, entry in self._store.items():
+            if now - entry.ts > self._ttl:
+                stale.append(key)
+                continue
+            score = _cosine(embedding, entry.embedding)
+            if score > best_score:
+                best_score = score
+                best_entry = entry
+
+        for key in stale:
+            del self._store[key]
+
+        if best_entry and best_score >= self._threshold:
+            # Move to end (LRU promotion)
+            self._store.move_to_end(id(best_entry))
+            return best_entry
+        return None
+
+    def store(
+        self,
+        embedding: list[float],
+        chunks: list["Chunk"],
+        citations: list["Citation"],
+        evidence_grade: str,
+        answer: str,
+    ) -> None:
+        entry = _CachedResult(
+            embedding=embedding,
+            chunks=chunks,
+            citations=citations,
+            evidence_grade=evidence_grade,
+            answer=answer,
+        )
+        key = id(entry)
+        self._store[key] = entry
+        if len(self._store) > self._max_size:
+            self._store.popitem(last=False)  # evict oldest
+
+
+# ---------------------------------------------------------------------------
 # RAG class
 # ---------------------------------------------------------------------------
 
@@ -97,6 +181,7 @@ class QwivaRAG:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         _configure_langfuse(self._settings)
+        self._cache = _SemanticCache()
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,8 +215,26 @@ class QwivaRAG:
           3. event: token      (one per token as the LLM streams)
           4. event: done
         """
+        # --- embed first (needed for cache lookup and retrieval) ---
         yield _sse("status", {"message": "Searching guidelines…"})
         embedding = await self._embed(query)
+
+        # --- semantic cache check ---
+        cached = self._cache.lookup(embedding)
+        if cached:
+            yield _sse("citations", CitationsPayload(
+                citations=cached.citations,
+                evidence_grade=cached.evidence_grade,
+            ).model_dump())
+            yield _sse("status", {"message": "Generating answer…"})
+            # Stream cached answer in small chunks to preserve typewriter UX
+            step = 8
+            for i in range(0, len(cached.answer), step):
+                yield _sse("token", {"token": cached.answer[i:i + step]})
+            yield _sse("done", {})
+            return
+
+        # --- full pipeline on cache miss ---
         top_chunks = await self._hybrid_search(query, embedding)
 
         yield _sse("status", {"message": "Ranking results…"})
@@ -139,17 +242,99 @@ class QwivaRAG:
 
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
-        yield _sse("citations", CitationsPayload(citations=citations, evidence_grade=evidence_grade).model_dump())
+        citations_payload = CitationsPayload(citations=citations, evidence_grade=evidence_grade)
+        yield _sse("citations", citations_payload.model_dump())
 
         yield _sse("status", {"message": "Generating answer…"})
+        answer_parts: list[str] = []
         async for token in self._generate_stream(query, chunks, user_id=user_id):
+            answer_parts.append(token)
             yield _sse("token", {"token": token})
+
+        # Store in cache for future identical/similar queries
+        self._cache.store(
+            embedding=embedding,
+            chunks=chunks,
+            citations=citations,
+            evidence_grade=evidence_grade,
+            answer="".join(answer_parts),
+        )
 
         yield _sse("done", {})
 
     # ------------------------------------------------------------------
-    # Retrieval pipeline
+    # Retrieval
     # ------------------------------------------------------------------
+
+    async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
+        """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
+        if self._settings.qdrant_url:
+            vector_chunks, fts_chunks = await asyncio.gather(
+                self._qdrant_search(embedding),
+                self._fts_search(query),
+            )
+            return _rrf_merge(
+                vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
+            )
+
+        # Fallback: legacy single Supabase RPC (no Qdrant configured)
+        db = await get_db()
+        response = await db.rpc(
+            "dynamic_hybrid_search_db",
+            {
+                "query_embedding": embedding,
+                "query_text": query,
+                "dense_weight": self._settings.dense_weight,
+                "sparse_weight": self._settings.sparse_weight,
+                "ilike_weight": 0.0,
+                "fuzzy_weight": 0.0,
+                "rrf_k": self._settings.rrf_k,
+                "match_count": self._settings.retrieval_top_k,
+                "filter": {},
+                "fuzzy_threshold": 0.3,
+            },
+        ).execute()
+        return [_row_to_chunk(r) for r in (response.data or [])]
+
+    async def _qdrant_search(self, embedding: list[float]) -> list[Chunk]:
+        response = await self._qdrant.query_points(
+            collection_name=self._settings.qdrant_collection,
+            query=embedding,
+            limit=self._settings.retrieval_top_k,
+            with_payload=True,
+        )
+        return [_qdrant_hit_to_chunk(r) for r in response.points]
+
+    async def _fts_search(self, query: str) -> list[Chunk]:
+        db = await get_db()
+        response = (
+            await db.table("documents_v2")
+            .select("id, content, metadata")
+            .filter("fts", "wfts", query)
+            .limit(self._settings.retrieval_top_k)
+            .execute()
+        )
+        return [_row_to_chunk(r) for r in (response.data or [])]
+
+    async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
+        if not chunks:
+            return chunks
+        response = await self._http.post(
+            self._settings.rerank_base_url,
+            headers={
+                "Authorization": f"Bearer {self._settings.nvidia_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._settings.rerank_model,
+                "query": query,
+                "documents": [c.content for c in chunks],
+                "top_n": self._settings.rerank_top_n,
+            },
+        )
+        response.raise_for_status()
+        results = response.json()["results"]
+        return [chunks[r["index"]] for r in results]
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
         embedding = await self._embed(query)
@@ -162,49 +347,6 @@ class QwivaRAG:
             input=query,
         )
         return response.data[0].embedding
-
-    async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
-        """Single DB round-trip: vector + FTS with RRF merged in Supabase.
-
-        Uses a static SQL function (hybrid_search) so Postgres can cache the
-        query plan — faster than dynamic_hybrid_search_db which re-plans every call.
-        """
-        db = await get_db()
-        response = await db.rpc(
-            "hybrid_search",
-            {
-                "query_embedding": embedding,
-                "query_text": query,
-                "match_count": self._settings.retrieval_top_k,
-                "rrf_k": self._settings.rrf_k,
-                "dense_w": self._settings.dense_weight,
-                "sparse_w": self._settings.sparse_weight,
-            },
-        ).execute()
-        return [_row_to_chunk(r) for r in (response.data or [])]
-
-    async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
-        if not chunks:
-            return chunks
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                self._settings.rerank_base_url,
-                headers={
-                    "Authorization": f"Bearer {self._settings.nvidia_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._settings.rerank_model,
-                    "query": query,
-                    "documents": [c.content for c in chunks],
-                    "top_n": self._settings.rerank_top_n,
-                },
-            )
-            response.raise_for_status()
-            results = response.json()["results"]
-
-        return [chunks[r["index"]] for r in results]
 
     # ------------------------------------------------------------------
     # Generation
@@ -275,6 +417,19 @@ class QwivaRAG:
             base_url=self._settings.nvidia_api_base,
         )
 
+    @cached_property
+    def _http(self) -> httpx.AsyncClient:
+        """Persistent HTTP client for reranker — avoids per-request TCP handshake."""
+        return httpx.AsyncClient(timeout=90)
+
+    @cached_property
+    def _qdrant(self) -> AsyncQdrantClient:
+        """Async Qdrant client — reused across requests."""
+        return AsyncQdrantClient(
+            url=self._settings.qdrant_url,
+            api_key=self._settings.qdrant_api_key,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton — import this in main.py
@@ -343,3 +498,38 @@ def _derive_evidence_grade(chunks: list[Chunk]) -> str:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _rrf_merge(
+    vector_chunks: list[Chunk],
+    fts_chunks: list[Chunk],
+    k: int,
+    top_n: int,
+) -> list[Chunk]:
+    """Reciprocal Rank Fusion — merges two ranked lists into one."""
+    scores: dict[str, float] = {}
+    chunk_map: dict[str, Chunk] = {}
+
+    for rank, chunk in enumerate(vector_chunks):
+        scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (k + rank + 1)
+        chunk_map[chunk.id] = chunk
+
+    for rank, chunk in enumerate(fts_chunks):
+        scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (k + rank + 1)
+        chunk_map[chunk.id] = chunk
+
+    sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)
+    return [chunk_map[cid] for cid in sorted_ids[:top_n]]
+
+
+def _qdrant_hit_to_chunk(hit) -> Chunk:
+    p = hit.payload or {}
+    return Chunk(
+        id=str(hit.id),
+        content=p.get("content", ""),
+        guideline_title=p.get("guideline_title", "Unknown guideline"),
+        cascading_path=p.get("cascading_path", ""),
+        year=str(p.get("year", "")),
+        publisher=p.get("publisher", ""),
+        chunk_index=int(p.get("chunk_index", 0)),
+    )
