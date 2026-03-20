@@ -1,8 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import type { Citation } from '@/types'
 import StreamingText from './StreamingText'
+
+const MAX_VISIBLE = 3
 
 interface Props {
   answer: string
@@ -12,7 +15,10 @@ interface Props {
 }
 
 export default function AnswerCard({ answer, citations, isStreaming, isDone }: Props) {
-  const uniqueCitations = citations  // deduplicated by backend
+  const [showAll, setShowAll] = useState(false)
+
+  const visible = showAll ? citations : citations.slice(0, MAX_VISIBLE)
+  const hiddenCount = citations.length - MAX_VISIBLE
 
   return (
     <div className="w-full space-y-6">
@@ -32,10 +38,10 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone }: P
         <StreamingText text={answer} isStreaming={isStreaming} />
       )}
 
-      {/* Sources — only after done */}
-      {isDone && uniqueCitations.length > 0 && (
-        <div className="pt-5 border-t border-[#2a2a2a] space-y-4">
-          <div className="flex items-center justify-between">
+      {/* Sources — only after done, only when there are citations */}
+      {isDone && citations.length > 0 && (
+        <div className="pt-4 border-t border-[#2a2a2a]">
+          <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
               Sources
             </p>
@@ -47,26 +53,30 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone }: P
             </Link>
           </div>
 
-          <ol className="space-y-4">
-            {uniqueCitations.map((c) => (
-              <li key={c.index} className="flex gap-3">
-                <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 mt-0.5 text-[10px] font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 rounded-full">
+          <ol className="space-y-2.5">
+            {visible.map((c) => (
+              <li key={c.index} className="flex gap-2.5 items-start">
+                <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 mt-0.5 text-[9px] font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 rounded-full">
                   {c.index}
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#e8e8e8] leading-snug">
-                    {c.guideline_title}
-                  </p>
-                  {c.section && (
-                    <p className="text-xs text-[#6b6b6b] mt-0.5 truncate">{c.section}</p>
-                  )}
-                  <p className="text-xs text-[#4a4a4a] mt-0.5">
+                  <p className="text-xs text-[#c8c8c8] leading-snug">{c.guideline_title}</p>
+                  <p className="text-[11px] text-[#4a4a4a] mt-0.5">
                     {[c.publisher, c.year].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </li>
             ))}
           </ol>
+
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              className="mt-2.5 text-xs text-[#6b6b6b] hover:text-teal-400 transition-colors"
+            >
+              {showAll ? 'Show less' : `+${hiddenCount} more source${hiddenCount > 1 ? 's' : ''}`}
+            </button>
+          )}
         </div>
       )}
     </div>

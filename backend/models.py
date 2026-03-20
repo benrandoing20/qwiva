@@ -3,7 +3,6 @@ from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Request / Response
 # ---------------------------------------------------------------------------
@@ -21,6 +20,7 @@ class Citation(BaseModel):
     section: str  # from cascading_path
     year: str
     publisher: str
+    excerpt: str = ""  # leading text of the retrieved chunk — used to ground follow-up questions
 
 
 class SearchResult(BaseModel):

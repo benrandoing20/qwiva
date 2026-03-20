@@ -79,6 +79,23 @@ Answer using only the excerpts above. Place citations [1], [2], etc. at the end 
 of the sentence or paragraph they support — not after every clause.
 """
 
+_CHAT_SYSTEM_PROMPT = """\
+You are Qwiva, a clinical decision-support assistant for physicians in Kenya.
+Be concise and professional. Address the physician directly.
+
+You are responding to a conversational message or a follow-up that can be \
+answered from the conversation so far. Respond naturally and briefly.
+
+Citation handling: if the user asks about a source from a previous response, \
+describe it exactly as listed in the "Referenced sources" section of that response. \
+Do not speculate about whether a citation was correctly attributed — sources were \
+retrieved from verified guideline documents by the system. Trust them as given.
+
+For clinical questions needing specific guideline information (dosing, protocols, \
+treatment algorithms), give a brief answer if you can, and suggest they ask it \
+as a dedicated clinical question to get a fully cited guideline-grounded response.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Internal chunk representation
@@ -204,7 +221,7 @@ class QwivaRAG:
         )
 
     async def stream_search(
-        self, query: str, user_id: str
+        self, query: str, user_id: str, history: list[dict] | None = None
     ) -> AsyncGenerator[str, None]:
         """
         Streaming search. Yields raw SSE-formatted strings.
@@ -247,7 +264,7 @@ class QwivaRAG:
 
         yield _sse("status", {"message": "Generating answer…"})
         answer_parts: list[str] = []
-        async for token in self._generate_stream(query, chunks, user_id=user_id):
+        async for token in self._generate_stream(query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
@@ -353,7 +370,11 @@ class QwivaRAG:
     # ------------------------------------------------------------------
 
     async def _generate_stream(
-        self, query: str, chunks: list[Chunk], user_id: str = ""
+        self,
+        query: str,
+        chunks: list[Chunk],
+        user_id: str = "",
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         # Assign the same deduplicated indices used in citations
         seen: dict[str, int] = {}
@@ -370,8 +391,10 @@ class QwivaRAG:
             f"[{n}] {c.guideline_title} — {c.cascading_path}\n{c.content}"
             for n, c in numbered
         )
+        history_messages = _trim_history(history or [])
         messages = [
             {"role": "system", "content": _SYSTEM_PROMPT},
+            *history_messages,
             {
                 "role": "user",
                 "content": _USER_TEMPLATE.format(
@@ -380,12 +403,6 @@ class QwivaRAG:
                 ),
             },
         ]
-
-        extra: dict = {}
-        if self._settings.nvidia_api_key:
-            extra["api_key"] = self._settings.nvidia_api_key
-        if self._settings.nvidia_api_base:
-            extra["api_base"] = self._settings.nvidia_api_base
 
         response = await litellm.acompletion(
             model=self._settings.litellm_model,
@@ -397,7 +414,7 @@ class QwivaRAG:
                 "trace_user_id": user_id,
                 "trace_metadata": {"query": query, "num_sources": len(chunks)},
             },
-            **extra,
+            **self._extra_kwargs,
         )
 
         async for chunk in response:
@@ -406,8 +423,86 @@ class QwivaRAG:
                 yield token
 
     # ------------------------------------------------------------------
+    # Routing: classify a user message
+    # ------------------------------------------------------------------
+
+    async def classify(self, query: str, history: list[dict]) -> str:
+        """Return 'rag' if guideline lookup is needed, 'chat' for conversational reply."""
+        history_snippet = ""
+        if history:
+            last_few = history[-4:]
+            history_snippet = "\n".join(
+                f"{m['role'].upper()}: {m['content'][:300]}" for m in last_few
+            )
+
+        prompt = (
+            "Classify this message for a clinical assistant.\n"
+            "Reply with ONLY one word: rag OR chat\n\n"
+            "rag = needs clinical guideline lookup (treatments, diagnoses, dosing, protocols)\n"
+            "chat = greeting, thanks, small talk, or answerable from conversation history\n\n"
+            + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
+            + f"Message: {query}"
+        )
+        try:
+            resp = await litellm.acompletion(
+                model=self._settings.litellm_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=5,
+                temperature=0,
+                **self._extra_kwargs,
+            )
+            result = resp.choices[0].message.content.strip().lower()
+            return "rag" if "rag" in result else "chat"
+        except Exception:
+            return "rag"  # safe default for a clinical app
+
+    # ------------------------------------------------------------------
+    # Direct chat (no retrieval)
+    # ------------------------------------------------------------------
+
+    async def stream_chat(
+        self, query: str, user_id: str, history: list[dict] | None = None
+    ) -> AsyncGenerator[str, None]:
+        """Stream a direct response from conversation context — no RAG."""
+        yield _sse("status", {"message": "Thinking…"})
+        yield _sse("citations", CitationsPayload(citations=[], evidence_grade="").model_dump())
+
+        history_messages = _trim_history(history or [])
+        messages = [
+            {"role": "system", "content": _CHAT_SYSTEM_PROMPT},
+            *history_messages,
+            {"role": "user", "content": query},
+        ]
+
+        response = await litellm.acompletion(
+            model=self._settings.litellm_model,
+            messages=messages,
+            stream=True,
+            metadata={
+                "trace_name": "qwiva_chat",
+                "tags": ["chat"],
+                "trace_user_id": user_id,
+            },
+            **self._extra_kwargs,
+        )
+        async for chunk in response:
+            token = chunk.choices[0].delta.content
+            if token:
+                yield _sse("token", {"token": token})
+        yield _sse("done", {})
+
+    # ------------------------------------------------------------------
     # Lazy clients (constructed once, reused across requests)
     # ------------------------------------------------------------------
+
+    @cached_property
+    def _extra_kwargs(self) -> dict:
+        extra: dict = {}
+        if self._settings.nvidia_api_key:
+            extra["api_key"] = self._settings.nvidia_api_key
+        if self._settings.nvidia_api_base:
+            extra["api_base"] = self._settings.nvidia_api_base
+        return extra
 
     @cached_property
     def _openai(self) -> AsyncOpenAI:
@@ -443,6 +538,19 @@ rag = QwivaRAG()
 # ---------------------------------------------------------------------------
 
 
+def _trim_history(history: list[dict], max_turns: int = 6, max_chars: int = 8000) -> list[dict]:
+    """Return the most recent messages within a character budget."""
+    recent = history[-max_turns:]
+    total = 0
+    trimmed: list[dict] = []
+    for msg in reversed(recent):
+        total += len(msg.get("content", ""))
+        if total > max_chars:
+            break
+        trimmed.insert(0, msg)
+    return trimmed
+
+
 def _row_to_chunk(row: dict) -> Chunk:
     meta = row.get("metadata") or {}
     return Chunk(
@@ -457,12 +565,17 @@ def _row_to_chunk(row: dict) -> Chunk:
 
 
 
+_EXCERPT_CHARS = 400  # chars of chunk content stored per citation for follow-up grounding
+
+
 def _build_citations(chunks: list[Chunk]) -> list[Citation]:
     """
     Build deduplicated citations from reranked chunks.
     Multiple chunks from the same guideline collapse into one citation entry.
     The LLM prompt is also built with these deduplicated numbers, so [1][2]
     in the answer text always matches what the UI displays.
+    The leading excerpt of the first (highest-ranked) chunk is stored so
+    follow-up questions can reference what was actually retrieved.
     """
     seen: dict[str, int] = {}  # guideline_title -> assigned index
     citations: list[Citation] = []
@@ -478,6 +591,7 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
                 section=chunk.cascading_path,
                 year=chunk.year,
                 publisher=chunk.publisher,
+                excerpt=chunk.content[:_EXCERPT_CHARS],
             ))
             idx += 1
 
