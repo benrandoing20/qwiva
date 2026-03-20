@@ -1,4 +1,4 @@
-import type { SSEEvent } from '@/types'
+import type { SSEEvent, Conversation, ChatMessage } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -9,14 +9,20 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 export async function* streamSearch(
   query: string,
   token: string,
+  conversationId?: string | null,
+  parentMessageId?: string | null,
 ): AsyncGenerator<SSEEvent> {
+  const body: Record<string, string | null> = { query }
+  if (conversationId !== undefined) body.conversation_id = conversationId ?? null
+  if (parentMessageId !== undefined) body.parent_message_id = parentMessageId ?? null
+
   const response = await fetch(`${API_URL}/search/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
@@ -62,4 +68,63 @@ function parseSSEBlock(block: string): SSEEvent | null {
   } catch {
     return null
   }
+}
+
+export async function fetchConversations(token: string): Promise<Conversation[]> {
+  const response = await fetch(`${API_URL}/conversations`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error(`Failed to fetch conversations (${response.status})`)
+  return response.json()
+}
+
+export async function deleteConversation(
+  conversationId: string,
+  token: string,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/conversations/${conversationId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok && response.status !== 204) {
+    throw new Error(`Failed to delete conversation (${response.status})`)
+  }
+}
+
+export async function fetchConversationMessages(
+  conversationId: string,
+  token: string,
+): Promise<ChatMessage[]> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/conversations/${conversationId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!response.ok) throw new Error(`Failed to fetch messages (${response.status})`)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw: any[] = await response.json()
+
+  return raw.map((msg) => {
+    // citations may arrive as a JSON string (stored via json.dumps) or already parsed
+    let citations = msg.citations ?? undefined
+    if (typeof citations === 'string') {
+      try { citations = JSON.parse(citations) } catch { citations = undefined }
+    }
+    return {
+      id: msg.id,
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content ?? '',
+      citations,
+      evidence_grade: msg.evidence_grade ?? undefined,
+      isStreaming: false,
+      isError: false,
+    }
+  })
 }
