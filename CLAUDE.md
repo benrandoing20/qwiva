@@ -108,6 +108,28 @@ data: {}
 - **Embedding model**: Must match ingestion — `text-embedding-3-small` (1536-dim)
 - **Supabase client**: Uses service key on backend (never exposed to frontend)
 
+## Evals
+
+```bash
+# Install eval dependencies
+uv pip install -e ".[eval]"
+
+# Run full eval suite (calls judge LLM — costs API credits)
+python -m evals.run_evals
+
+# Fast run — code metrics only, no LLM judge
+python -m evals.run_evals --skip-ragas --skip-deepeval --n 5
+
+# Reports written to evals/reports/ as JSON + Markdown
+```
+
+Key design decisions:
+- `pipeline.py` calls RAG internals directly to capture per-stage latency
+- RAGAS and DeepEval both use the NVIDIA hub LLM as judge (same model, zero extra cost)
+- Clinical metrics (citation rate, source coverage) are code-based — free to run always
+- `--skip-ragas --skip-deepeval` mode runs in ~1min with no LLM judge calls
+- Golden dataset in `evals/datasets/clinical_questions.json`
+
 ## Supabase schema (do not modify)
 
 Table `documents_v2`: `id`, `content`, `embedding` (vector/1536), `metadata` (jsonb), `fts` (tsvector)

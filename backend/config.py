@@ -26,11 +26,16 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # Qdrant vector store
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
+    qdrant_collection: str = "qwiva_docs"
+
     # Deployment
     frontend_url: str = "http://localhost:3000"
 
     # Search tuning
-    retrieval_top_k: int = 20
+    retrieval_top_k: int = 12
     rerank_top_n: int = 5
     rrf_k: int = 60
     dense_weight: float = 0.6   # must sum to 1.0 with sparse_weight
