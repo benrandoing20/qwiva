@@ -5,3 +5,16 @@ __pycache__/
 node_modules/
 .next/
 frontend/.env.local
+
+# DeepEval
+.deepeval-cache.json
+.deepeval_telemetry.txt
+
+# Eval reports (generated output)
+evals/reports/
+
+# Reference / scratch dirs
+_reference/
+
+# TS build cache
+frontend/tsconfig.tsbuildinfo

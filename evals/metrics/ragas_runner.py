@@ -23,81 +23,85 @@ async def run_ragas(
     questions: list[EvalQuestion],
     config: EvalConfig,
 ) -> RagasReport:
-    """Run RAGAS metrics using the NVIDIA-backed LLM as judge."""
+    """Run RAGAS 0.4+ metrics using the NVIDIA-backed LLM as judge."""
     try:
-        from datasets import Dataset
-        from langchain_community.chat_models import ChatLiteLLM
-        from langchain_openai import OpenAIEmbeddings
-        from ragas import evaluate
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from ragas import EvaluationDataset, evaluate
+        from ragas.dataset_schema import SingleTurnSample
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
         from ragas.metrics import (
-            answer_relevancy,
-            context_precision,
-            context_recall,
-            faithfulness,
+            AnswerRelevancy,
+            ContextPrecision,
+            ContextRecall,
+            Faithfulness,
         )
     except ImportError as e:
         print(
             f"[ragas] missing dependency: {e}. "
-            "Run: pip install ragas langchain-community langchain-openai"
+            "Run: uv pip install -e '.[eval]'"
         )
-        return RagasReport(0, 0, 0, 0, 0)
+        return RagasReport(float("nan"), float("nan"), float("nan"), float("nan"), 0)
 
     ok = [r for r in results if r.error is None and r.answer]
     q_map = {q.question: q for q in questions}
 
-    rows = []
+    samples = []
     for r in ok:
         q = q_map.get(r.question)
         if q is None or not r.contexts:
             continue
-        rows.append(
-            {
-                "question": r.question,
-                "answer": r.answer,
-                "contexts": r.contexts,
-                "ground_truth": q.ground_truth,
-            }
+        samples.append(
+            SingleTurnSample(
+                user_input=r.question,
+                response=r.answer,
+                retrieved_contexts=r.contexts,
+                reference=q.ground_truth,
+            )
         )
 
-    if not rows:
-        return RagasReport(0, 0, 0, 0, 0)
+    if not samples:
+        return RagasReport(float("nan"), float("nan"), float("nan"), float("nan"), 0)
 
-    dataset = Dataset.from_list(rows)
+    dataset = EvaluationDataset(samples=samples)
 
-    # Configure judge LLM -> NVIDIA hub via LiteLLM
+    # NVIDIA hub is OpenAI-compatible. Strip the LiteLLM "openai/" routing prefix
+    # so ChatOpenAI sends the model name the hub expects.
+    model_name = config.judge_model.removeprefix("openai/")
+    base_url = config.judge_api_base.rstrip("/")
+
     judge_llm = LangchainLLMWrapper(
-        ChatLiteLLM(
-            model=config.judge_model,
-            api_base=config.judge_api_base,
+        ChatOpenAI(
+            model=model_name,
             api_key=config.judge_api_key,
+            base_url=base_url,
         )
     )
-    # Configure embeddings -> NVIDIA hub
     embeddings = LangchainEmbeddingsWrapper(
         OpenAIEmbeddings(
             model="azure/openai/text-embedding-3-small",
             openai_api_key=config.judge_api_key,
-            openai_api_base=config.judge_api_base,
+            openai_api_base=base_url,
         )
     )
 
-    metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
-    for m in metrics:
-        m.llm = judge_llm
-    answer_relevancy.embeddings = embeddings
+    metrics = [
+        Faithfulness(llm=judge_llm),
+        AnswerRelevancy(llm=judge_llm, embeddings=embeddings),
+        ContextPrecision(llm=judge_llm),
+        ContextRecall(llm=judge_llm),
+    ]
 
     result = evaluate(dataset, metrics=metrics)
     df = result.to_pandas()
 
-    def safe_mean(col):
-        return round(float(df[col].dropna().mean()), 4) if col in df.columns else 0.0
+    def safe_mean(col: str) -> float:
+        return round(float(df[col].dropna().mean()), 4) if col in df.columns else float("nan")
 
     return RagasReport(
         faithfulness=safe_mean("faithfulness"),
         answer_relevancy=safe_mean("answer_relevancy"),
         context_precision=safe_mean("context_precision"),
         context_recall=safe_mean("context_recall"),
-        n_evaluated=len(rows),
+        n_evaluated=len(samples),
     )

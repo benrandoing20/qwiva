@@ -1,4 +1,5 @@
 import time
+import traceback
 from dataclasses import dataclass
 
 from backend.models import Citation
@@ -25,6 +26,9 @@ class PipelineResult:
 
 async def run_question(question: str) -> PipelineResult:
     t_start = time.perf_counter()
+    embed_ms = retrieval_ms = rerank_ms = ttft_ms = total_generation_ms = 0.0
+    chunks: list = []
+    reranked: list = []
     try:
         # 1. Embed
         t = time.perf_counter()
@@ -43,12 +47,13 @@ async def run_question(question: str) -> PipelineResult:
 
         # 4. Generate (capture TTFT + full answer)
         t = time.perf_counter()
-        ttft_ms = None
+        _ttft_ms = None
         tokens = []
         async for token in rag._generate_stream(question, reranked):
-            if ttft_ms is None:
-                ttft_ms = (time.perf_counter() - t) * 1000
+            if _ttft_ms is None:
+                _ttft_ms = (time.perf_counter() - t) * 1000
             tokens.append(token)
+        ttft_ms = _ttft_ms or 0.0
         total_generation_ms = (time.perf_counter() - t) * 1000
 
         answer = "".join(tokens)
@@ -65,18 +70,22 @@ async def run_question(question: str) -> PipelineResult:
             embed_ms=embed_ms,
             retrieval_ms=retrieval_ms,
             rerank_ms=rerank_ms,
-            ttft_ms=ttft_ms or 0.0,
+            ttft_ms=ttft_ms,
             total_generation_ms=total_generation_ms,
             total_ms=total_ms,
         )
-    except Exception as e:
+    except Exception:
         return PipelineResult(
             question=question,
-            retrieved_chunks=[],
-            reranked_chunks=[],
+            retrieved_chunks=chunks,
+            reranked_chunks=reranked,
             answer="",
             citations=[],
             contexts=[],
+            embed_ms=embed_ms,
+            retrieval_ms=retrieval_ms,
+            rerank_ms=rerank_ms,
+            ttft_ms=ttft_ms,
             total_ms=(time.perf_counter() - t_start) * 1000,
-            error=str(e),
+            error=traceback.format_exc(),
         )
