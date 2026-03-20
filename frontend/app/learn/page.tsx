@@ -12,7 +12,7 @@ import Navbar from '@/components/Navbar'
 const MOCK_STATS = {
   xp: 1340,
   streakDays: 7,
-  cmeCredits: 2.68,   // xp / 500
+  cmeCredits: 2.68,
   cmeRequired: 40,
 }
 
@@ -35,7 +35,7 @@ const MOCK_LESSONS = [
     minutesEst: 10,
     xpReward: 50,
     difficulty: 3,
-    reason: 'Due for review · Spaced repetition',
+    reason: 'Due for review',
   },
   {
     id: '3',
@@ -49,118 +49,53 @@ const MOCK_LESSONS = [
   },
 ]
 
+const LEARNING_TRACKS = [
+  {
+    id: 'maternal-health',
+    title: 'Maternal & Neonatal Health',
+    description: 'ANC, labour, PPH, neonatal resuscitation, ARVs in pregnancy',
+    lessons: 24,
+    credits: 8,
+  },
+  {
+    id: 'infectious-disease',
+    title: 'Infectious Disease',
+    description: 'Malaria, TB, HIV, sepsis, antimicrobial stewardship',
+    lessons: 32,
+    credits: 10,
+  },
+  {
+    id: 'paediatrics',
+    title: 'Paediatrics',
+    description: 'Acute illness in under-5s, malnutrition, immunisation',
+    lessons: 28,
+    credits: 9,
+  },
+  {
+    id: 'emergency-medicine',
+    title: 'Emergency Medicine',
+    description: 'Trauma, ACS, stroke, poisoning, resuscitation',
+    lessons: 20,
+    credits: 7,
+  },
+  {
+    id: 'non-communicable',
+    title: 'Non-Communicable Disease',
+    description: 'Hypertension, diabetes, CKD, heart failure',
+    lessons: 22,
+    credits: 7,
+  },
+  {
+    id: 'surgical',
+    title: 'Surgical & Perioperative Care',
+    description: 'Pre-op assessment, wound care, post-op complications',
+    lessons: 16,
+    credits: 5,
+  },
+]
+
 const XP_PER_CREDIT = 500
 const CME_REQUIRED = 40
-
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
-
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-5 py-4">
-      <p className="text-xs text-[#6b6b6b] uppercase tracking-widest mb-1">{label}</p>
-      <p className="text-2xl font-bold text-white">{value}</p>
-      {sub && <p className="text-xs text-[#6b6b6b] mt-0.5">{sub}</p>}
-    </div>
-  )
-}
-
-function CMEProgress({ credits, required }: { credits: number; required: number }) {
-  const pct = Math.min((credits / required) * 100, 100)
-  const remaining = Math.max(required - credits, 0)
-
-  return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-5 py-5">
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <p className="text-xs text-[#6b6b6b] uppercase tracking-widest mb-1">CME Credits</p>
-          <p className="text-2xl font-bold text-white">
-            {credits.toFixed(1)}
-            <span className="text-sm font-normal text-[#6b6b6b] ml-1">/ {required} required</span>
-          </p>
-          <p className="text-xs text-[#6b6b6b] mt-0.5">Kenya MPDC annual requirement</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm font-semibold text-teal-400">{remaining.toFixed(1)} remaining</p>
-          <p className="text-xs text-[#6b6b6b] mt-0.5">≈ {Math.ceil(remaining / 12)} months at pace</p>
-        </div>
-      </div>
-      <div className="w-full h-2 bg-[#2a2a2a] rounded-full overflow-hidden">
-        <div
-          className="h-full bg-teal-500 rounded-full transition-all duration-700"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <p className="text-xs text-[#4a4a4a] mt-2">{pct.toFixed(1)}% of annual requirement complete</p>
-    </div>
-  )
-}
-
-function DifficultyDots({ level }: { level: number }) {
-  return (
-    <span className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <span
-          key={i}
-          className={`w-1.5 h-1.5 rounded-full ${i <= level ? 'bg-teal-500' : 'bg-[#2a2a2a]'}`}
-        />
-      ))}
-    </span>
-  )
-}
-
-function LessonCard({ lesson }: { lesson: typeof MOCK_LESSONS[0] }) {
-  return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-5 py-5 flex flex-col gap-3 hover:border-teal-500/30 transition-colors">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-[#e8e8e8] leading-snug">{lesson.title}</p>
-          <p className="text-xs text-[#4a4a4a] mt-1 truncate">{lesson.guideline}</p>
-        </div>
-        <span className="flex-shrink-0 text-xs text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2 py-1 rounded-lg whitespace-nowrap">
-          +{lesson.xpReward} XP
-        </span>
-      </div>
-
-      <div className="flex items-center gap-4 text-xs text-[#6b6b6b]">
-        <span>{lesson.questions} questions</span>
-        <span>{lesson.minutesEst} min</span>
-        <DifficultyDots level={lesson.difficulty} />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-[#4a4a4a] italic">{lesson.reason}</span>
-        <button
-          disabled
-          className="text-xs font-semibold text-[#4a4a4a] bg-[#2a2a2a] px-3 py-1.5 rounded-lg cursor-not-allowed"
-        >
-          Coming soon
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function XPToNextCredit({ xp }: { xp: number }) {
-  const xpInCurrentCredit = xp % XP_PER_CREDIT
-  const pct = (xpInCurrentCredit / XP_PER_CREDIT) * 100
-
-  return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-5 py-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs text-[#6b6b6b] uppercase tracking-widest">Next CME credit</p>
-        <p className="text-xs text-[#6b6b6b]">{xpInCurrentCredit} / {XP_PER_CREDIT} XP</p>
-      </div>
-      <div className="w-full h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
-        <div
-          className="h-full bg-teal-500 rounded-full transition-all duration-700"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -176,65 +111,188 @@ export default function LearnPage() {
   }, [router])
 
   const { xp, streakDays, cmeCredits } = MOCK_STATS
+  const xpInCurrentCredit = xp % XP_PER_CREDIT
+  const creditPct = Math.min((cmeCredits / CME_REQUIRED) * 100, 100)
+  const xpPct = (xpInCurrentCredit / XP_PER_CREDIT) * 100
 
   return (
     <div className="min-h-screen bg-[#0f0f0f]">
       <Navbar />
 
-      <main className="flex flex-col items-center px-4 pt-24 pb-24">
-        <div className="w-full max-w-2xl space-y-6">
+      <main className="max-w-3xl mx-auto px-6 pt-24 pb-32">
 
-          {/* Header */}
-          <div>
-            <h1 className="text-xl font-semibold text-white">Learning Hub</h1>
-            <p className="text-sm text-[#6b6b6b] mt-1">
-              Earn CME credits through daily clinical lessons
+        {/* ------------------------------------------------------------------ */}
+        {/* Hero */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="pt-10 pb-12 border-b border-[#1a1a1a]">
+          <p className="text-xs text-teal-500 uppercase tracking-widest font-semibold mb-3">
+            Learning Hub
+          </p>
+          <h1 className="text-3xl font-bold text-white tracking-tight leading-snug mb-4">
+            Turn clinical lookups<br />into CME credits.
+          </h1>
+          <p className="text-[#6b6b6b] text-sm leading-relaxed max-w-lg">
+            Each lesson is built from the same guidelines you search every day.
+            Complete structured tracks to build verifiable competency across a specialty —
+            not just isolated facts.
+          </p>
+        </div>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Progress */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="py-10 border-b border-[#1a1a1a]">
+          <div className="flex items-center justify-between mb-6">
+            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
+              Your progress
             </p>
+            <div className="flex items-center gap-5 text-xs text-[#6b6b6b]">
+              <span>
+                <span className="text-white font-semibold">{streakDays}</span> day streak
+              </span>
+              <span>
+                <span className="text-white font-semibold">{xp.toLocaleString()}</span> XP total
+              </span>
+            </div>
           </div>
 
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3">
-            <StatCard label="Total XP" value={xp.toLocaleString()} sub="500 XP = 1 credit" />
-            <StatCard
-              label="Streak"
-              value={`${streakDays}d`}
-              sub={streakDays >= 7 ? 'Weekly bonus active' : `${7 - streakDays}d to weekly bonus`}
-            />
-            <StatCard label="Credits" value={cmeCredits.toFixed(1)} sub="of 40 required" />
+          {/* CME bar */}
+          <div className="mb-6">
+            <div className="flex items-end justify-between mb-2">
+              <div>
+                <span className="text-2xl font-bold text-white">{cmeCredits.toFixed(1)}</span>
+                <span className="text-sm text-[#6b6b6b] ml-2">of {CME_REQUIRED} CME credits</span>
+              </div>
+              <span className="text-xs text-[#4a4a4a]">
+                {(CME_REQUIRED - cmeCredits).toFixed(1)} remaining
+              </span>
+            </div>
+            <div className="w-full h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-500 rounded-full transition-all duration-700"
+                style={{ width: `${creditPct}%` }}
+              />
+            </div>
+            <p className="text-xs text-[#4a4a4a] mt-2">Kenya MPDC annual requirement</p>
           </div>
-
-          {/* CME progress */}
-          <CMEProgress credits={cmeCredits} required={CME_REQUIRED} />
 
           {/* XP to next credit */}
-          <XPToNextCredit xp={xp} />
-
-          {/* Recommended lessons */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
-                Recommended for you
-              </p>
-              <p className="text-xs text-[#4a4a4a]">Based on search history</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-[#6b6b6b]">Next credit</p>
+              <p className="text-xs text-[#4a4a4a]">{xpInCurrentCredit} / {XP_PER_CREDIT} XP</p>
             </div>
-            <div className="space-y-3">
-              {MOCK_LESSONS.map((lesson) => (
-                <LessonCard key={lesson.id} lesson={lesson} />
-              ))}
+            <div className="w-full h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-500/60 rounded-full transition-all duration-700"
+                style={{ width: `${xpPct}%` }}
+              />
             </div>
           </div>
+        </div>
 
-          {/* Accreditation notice */}
-          <div className="bg-teal-500/5 border border-teal-500/15 rounded-2xl px-5 py-4">
-            <p className="text-xs font-semibold text-teal-400 mb-1">CME Accreditation</p>
-            <p className="text-xs text-[#6b6b6b] leading-relaxed">
-              Formal accreditation from the Kenya Medical Practitioners and Dentists Council
-              is in progress (18–24 month pathway). Credits earned now will be retroactively
-              recognised upon accreditation.
+        {/* ------------------------------------------------------------------ */}
+        {/* Learning tracks */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="py-10 border-b border-[#1a1a1a]">
+          <div className="mb-8">
+            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest mb-2">
+              Learning Tracks
+            </p>
+            <p className="text-sm text-[#4a4a4a] leading-relaxed">
+              Structured sequences covering a full clinical domain. Complete a track to demonstrate
+              competency across a specialty — not just individual topics.
             </p>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {LEARNING_TRACKS.map((track) => (
+              <div
+                key={track.id}
+                className="group relative bg-[#111111] border border-[#1e1e1e] rounded-2xl px-5 py-5 flex flex-col gap-3"
+              >
+                {/* Lock indicator */}
+                <div className="absolute top-4 right-4">
+                  <div className="w-4 h-4 text-[#2a2a2a]">
+                    <svg viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M11 7V5a3 3 0 0 0-6 0v2H4v7h8V7h-1zm-5-2a2 2 0 0 1 4 0v2H6V5z" />
+                    </svg>
+                  </div>
+                </div>
+
+                <div className="pr-6">
+                  <p className="text-sm font-semibold text-[#6b6b6b] leading-snug mb-1">
+                    {track.title}
+                  </p>
+                  <p className="text-xs text-[#3a3a3a] leading-relaxed">
+                    {track.description}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs text-[#3a3a3a]">
+                  <span>{track.lessons} lessons</span>
+                  <span className="w-px h-3 bg-[#2a2a2a]" />
+                  <span>{track.credits} credits</span>
+                </div>
+
+                <div className="mt-auto pt-1">
+                  <span className="text-xs text-[#2a2a2a] font-medium">Coming soon</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Today's picks */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="py-10 border-b border-[#1a1a1a]">
+          <div className="flex items-center justify-between mb-6">
+            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
+              Recommended for you
+            </p>
+            <p className="text-xs text-[#3a3a3a]">Based on search history</p>
+          </div>
+
+          <div className="space-y-2">
+            {MOCK_LESSONS.map((lesson) => (
+              <div
+                key={lesson.id}
+                className="flex items-start justify-between gap-4 bg-[#111111] border border-[#1e1e1e] rounded-2xl px-5 py-4"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm text-[#6b6b6b] font-medium leading-snug mb-1">
+                    {lesson.title}
+                  </p>
+                  <div className="flex items-center gap-3 text-xs text-[#3a3a3a]">
+                    <span>{lesson.questions} questions</span>
+                    <span className="w-px h-3 bg-[#2a2a2a]" />
+                    <span>{lesson.minutesEst} min</span>
+                    <span className="w-px h-3 bg-[#2a2a2a]" />
+                    <span>{lesson.reason}</span>
+                  </div>
+                </div>
+                <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                  <span className="text-xs text-teal-500/60">+{lesson.xpReward} XP</span>
+                  <span className="text-xs text-[#2a2a2a] font-medium">Coming soon</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Accreditation note */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="pt-10">
+          <p className="text-xs text-[#3a3a3a] leading-relaxed max-w-lg">
+            Credits shown here track your learning progress within Qwiva.
+            Formal CME accreditation from the Kenya Medical Practitioners and Dentists Council
+            is being pursued — until complete, credits are for personal progress tracking only
+            and do not satisfy official MPDC renewal requirements.
+          </p>
+        </div>
+
       </main>
     </div>
   )

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import type { Citation } from '@/types'
 import StreamingText from './StreamingText'
 
@@ -38,12 +39,12 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone }: P
             <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
               Sources
             </p>
-            <button
-              onClick={() => console.log('Learn topic', uniqueCitations)}
+            <Link
+              href="/learn"
               className="text-xs text-teal-500 hover:text-teal-400 transition-colors"
             >
               Learn this topic →
-            </button>
+            </Link>
           </div>
 
           <ol className="space-y-4">
