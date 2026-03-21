@@ -21,6 +21,7 @@ class Citation(BaseModel):
     year: str
     publisher: str
     excerpt: str = ""  # leading text of the retrieved chunk — used to ground follow-up questions
+    source_url: str = ""  # direct URL to the guideline document, if available in metadata
 
 
 class SearchResult(BaseModel):

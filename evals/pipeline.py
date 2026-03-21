@@ -2,7 +2,6 @@ import time
 import traceback
 from dataclasses import dataclass
 
-from backend.models import Citation
 from backend.rag import _build_citations, rag
 
 
@@ -15,6 +14,7 @@ class PipelineResult:
     citations: list  # list[Citation]
     contexts: list[str]  # chunk content strings (for RAGAS)
     # Latencies in ms
+    classify_ms: float = 0.0
     embed_ms: float = 0.0
     retrieval_ms: float = 0.0
     rerank_ms: float = 0.0
@@ -26,10 +26,15 @@ class PipelineResult:
 
 async def run_question(question: str) -> PipelineResult:
     t_start = time.perf_counter()
-    embed_ms = retrieval_ms = rerank_ms = ttft_ms = total_generation_ms = 0.0
+    classify_ms = embed_ms = retrieval_ms = rerank_ms = ttft_ms = total_generation_ms = 0.0
     chunks: list = []
     reranked: list = []
     try:
+        # 0. Routing (classify)
+        t = time.perf_counter()
+        await rag.classify(question, [])
+        classify_ms = (time.perf_counter() - t) * 1000
+
         # 1. Embed
         t = time.perf_counter()
         embedding = await rag._embed(question)
@@ -67,6 +72,7 @@ async def run_question(question: str) -> PipelineResult:
             answer=answer,
             citations=citations,
             contexts=[c.content for c in reranked],
+            classify_ms=classify_ms,
             embed_ms=embed_ms,
             retrieval_ms=retrieval_ms,
             rerank_ms=rerank_ms,
@@ -82,6 +88,7 @@ async def run_question(question: str) -> PipelineResult:
             answer="",
             citations=[],
             contexts=[],
+            classify_ms=classify_ms,
             embed_ms=embed_ms,
             retrieval_ms=retrieval_ms,
             rerank_ms=rerank_ms,

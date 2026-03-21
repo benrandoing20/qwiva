@@ -11,11 +11,19 @@ class Settings(BaseSettings):
     supabase_service_key: str
     supabase_jwt_secret: str
 
-    # NVIDIA Inference Hub (used for both embeddings and LLM)
+    # NVIDIA Inference Hub (embeddings, reranker, fast classify model)
     nvidia_api_key: str
     nvidia_api_base: str = "https://inference-api.nvidia.com/v1/"
     embedding_model: str = "azure/openai/text-embedding-3-small"
+
+    # Main generation model — defaults to NVIDIA-routed Bedrock Sonnet.
+    # Set to "anthropic/claude-sonnet-4-6" + ANTHROPIC_API_KEY to enable prompt caching.
     litellm_model: str = "openai/aws/anthropic/bedrock-claude-sonnet-4-6"
+    anthropic_api_key: str = ""  # required only when litellm_model uses anthropic/ prefix
+
+    # Routing classifier — use a small fast model to keep classify latency low.
+    # Defaults to llama-3.1-8b on NVIDIA NIM (~200ms vs ~1100ms for Sonnet).
+    classify_model: str = "openai/meta/llama-3.1-8b-instruct"
 
     # Reranker
     rerank_model: str = "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2"

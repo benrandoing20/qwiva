@@ -148,7 +148,7 @@ export default function HomePage() {
   // ------------------------------------------------------------------
   const handleSelectConversation = useCallback(async (id: string) => {
     setActiveConversationId(id)
-    setMessages([])
+    // Don't clear messages immediately — keep old content visible while fetching
     setIsLoading(false)
     setConversationError(null)
     setIsLoadingConversation(true)
@@ -159,10 +159,14 @@ export default function HomePage() {
       const token = await getAccessToken()
       if (!token) { router.push('/auth/login'); return }
       const msgs = await fetchConversationMessages(id, token)
+      // Swap messages in a single update so there's no blank frame
       setMessages(msgs)
       const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
       lastAssistantIdRef.current = lastAssistant?.id ?? null
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
+      // Scroll after paint so layout is stable
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load conversation'
       setConversationError(msg)
@@ -245,6 +249,7 @@ export default function HomePage() {
     // Track the real ids resolved from SSE
     let realConversationId: string | null = activeConversationId
     let realUserMessageId: string | null = null
+    let pendingSuggestions: string[] = []
 
     try {
       for await (const event of streamSearch(
@@ -262,17 +267,15 @@ export default function HomePage() {
               m.id === tempUserId ? { ...m, id: realUserMessageId! } : m,
             ),
           )
-          // New conversation — insert into sidebar immediately with query as provisional title
-          // so the user sees it right away. The `title` SSE event will replace it with the
-          // LLM-generated title once it arrives.
+          // New conversation — insert into sidebar with a blank title placeholder.
+          // The real AI-generated title arrives via the `title` SSE event shortly after
+          // (generated in parallel with the answer, so it's ready before streaming ends).
           if (!activeConversationId) {
-            const words = query.trim().split(/\s+/)
-            const provisionalTitle = words.slice(0, 6).join(' ') + (words.length > 6 ? '…' : '')
             const now = new Date().toISOString()
             setConversations((prev) => [
               {
                 id: realConversationId!,
-                title: provisionalTitle,
+                title: null,
                 title_generated: false,
                 created_at: now,
                 updated_at: now,
@@ -308,6 +311,8 @@ export default function HomePage() {
                 : m,
             ),
           )
+        } else if (event.event === 'suggestions') {
+          pendingSuggestions = event.data.suggestions
         } else if (event.event === 'done') {
           setMessages((prev) =>
             prev.map((m) => {
@@ -316,7 +321,14 @@ export default function HomePage() {
                 m.content,
                 m.citations ?? [],
               )
-              return { ...m, id: event.data.assistant_message_id, content: answer, citations, isStreaming: false }
+              return {
+                ...m,
+                id: event.data.assistant_message_id,
+                content: answer,
+                citations,
+                isStreaming: false,
+                suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
+              }
             }),
           )
           // Capture real DB id for use as parent_message_id on next turn
@@ -375,13 +387,8 @@ export default function HomePage() {
         {/* Main chat area */}
         <main className="flex flex-col flex-1 overflow-hidden">
           {/* Message thread (scrollable) */}
-          <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
-            {isLoadingConversation ? (
-              /* Loading conversation history */
-              <div className="flex items-center justify-center h-full">
-                <ThinkingIndicator message="Loading conversation…" />
-              </div>
-            ) : conversationError ? (
+          <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 overflow-y-auto relative">
+            {conversationError ? (
               /* Failed to load */
               <div className="flex flex-col items-center justify-center h-full gap-4">
                 <p className="text-sm text-red-400">{conversationError}</p>
@@ -416,11 +423,28 @@ export default function HomePage() {
               </div>
             ) : (
               /* Conversation thread */
-              <div className="max-w-3xl mx-auto w-full px-4 py-8 space-y-6">
+              <div
+                className="max-w-3xl mx-auto w-full px-4 py-8 space-y-6 transition-opacity duration-200"
+                style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
+              >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.id} message={msg} />
+                  <MessageRow key={msg.id} message={msg} onSuggest={handleSearch} />
                 ))}
                 <div ref={bottomRef} />
+              </div>
+            )}
+
+            {/* Fade overlay while switching conversations — sits on top of dimmed messages */}
+            {isLoadingConversation && messages.length > 0 && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <ThinkingIndicator message="Loading conversation…" />
+              </div>
+            )}
+
+            {/* Full-screen loader only for the first load (no previous messages to show) */}
+            {isLoadingConversation && messages.length === 0 && (
+              <div className="flex items-center justify-center h-full">
+                <ThinkingIndicator message="Loading conversation…" />
               </div>
             )}
           </div>
@@ -446,10 +470,10 @@ export default function HomePage() {
 // ---------------------------------------------------------------------------
 // Individual message row
 // ---------------------------------------------------------------------------
-function MessageRow({ message }: { message: ChatMessage }) {
+function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: (q: string) => void }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end animate-fadeIn">
         <div className="max-w-[80%] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 text-sm text-[#e8e8e8] leading-relaxed whitespace-pre-wrap">
           {message.content}
         </div>
@@ -476,12 +500,14 @@ function MessageRow({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full animate-fadeIn">
       <AnswerCard
         answer={message.content}
         citations={message.citations ?? []}
         isStreaming={message.isStreaming ?? false}
         isDone={!message.isStreaming}
+        suggestions={message.suggestions}
+        onSuggest={onSuggest}
       />
     </div>
   )
