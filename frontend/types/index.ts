@@ -4,6 +4,7 @@ export interface Citation {
   section: string
   year: string
   publisher: string
+  source_url?: string
 }
 
 export interface CitationsPayload {
@@ -22,6 +23,7 @@ export type SSEEvent =
   | { event: 'token'; data: TokenPayload }
   | { event: 'done'; data: { assistant_message_id: string } }
   | { event: 'title'; data: { conversation_id: string; title: string } }
+  | { event: 'suggestions'; data: { suggestions: string[] } }
   | { event: 'error'; data: { detail: string } }
 
 export type SearchStatus = 'idle' | 'searching' | 'streaming' | 'done' | 'error'
@@ -52,4 +54,5 @@ export interface ChatMessage {
   isStreaming?: boolean
   isError?: boolean
   statusMessage?: string
+  suggestions?: string[]
 }

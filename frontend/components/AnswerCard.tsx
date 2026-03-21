@@ -12,9 +12,11 @@ interface Props {
   citations: Citation[]
   isStreaming: boolean
   isDone: boolean
+  suggestions?: string[]
+  onSuggest?: (q: string) => void
 }
 
-export default function AnswerCard({ answer, citations, isStreaming, isDone }: Props) {
+export default function AnswerCard({ answer, citations, isStreaming, isDone, suggestions, onSuggest }: Props) {
   const [showAll, setShowAll] = useState(false)
 
   const visible = showAll ? citations : citations.slice(0, MAX_VISIBLE)
@@ -60,7 +62,18 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone }: P
                   {c.index}
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs text-[#c8c8c8] leading-snug">{c.guideline_title}</p>
+                  {c.source_url ? (
+                    <a
+                      href={c.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#c8c8c8] leading-snug hover:text-teal-400 transition-colors"
+                    >
+                      {c.guideline_title}
+                    </a>
+                  ) : (
+                    <p className="text-xs text-[#c8c8c8] leading-snug">{c.guideline_title}</p>
+                  )}
                   <p className="text-[11px] text-[#4a4a4a] mt-0.5">
                     {[c.publisher, c.year].filter(Boolean).join(' · ')}
                   </p>
@@ -77,6 +90,26 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone }: P
               {showAll ? 'Show less' : `+${hiddenCount} more source${hiddenCount > 1 ? 's' : ''}`}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Follow-up suggestions — appear after done */}
+      {isDone && suggestions && suggestions.length > 0 && onSuggest && (
+        <div className="pt-4">
+          <p className="text-[10px] font-semibold text-[#4a4a4a] uppercase tracking-widest mb-2.5">
+            Follow up
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                onClick={() => onSuggest(s)}
+                className="px-3 py-1.5 text-xs text-[#9a9a9a] bg-[#1a1a1a] border border-[#2a2a2a] rounded-full hover:border-teal-500/40 hover:text-teal-400 transition-all text-left"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

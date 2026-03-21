@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -35,8 +36,14 @@ app = FastAPI(title="Qwiva API", version="0.1.0")
 
 @app.on_event("startup")
 async def startup() -> None:
-    """Pre-warm the Supabase connection so the first query doesn't pay init cost."""
-    await get_db()
+    """Pre-warm all clients so the first request doesn't pay initialisation cost."""
+    # Touch all @cached_property clients — this constructs them once and caches them
+    _ = rag._openai   # embedding client (AsyncOpenAI → NVIDIA hub)
+    _ = rag._http     # reranker HTTP client (httpx.AsyncClient)
+    _ = rag._extra_kwargs  # LiteLLM kwargs dict
+    if rag._settings.qdrant_url:
+        _ = rag._qdrant  # Qdrant async client
+    await get_db()  # Supabase connection pool
 
 
 app.add_middleware(
@@ -212,13 +219,34 @@ async def search_stream(
             import json as _json
             yield f"event: conversation\ndata: {_json.dumps({'conversation_id': conversation_id, 'user_message_id': user_message_id})}\n\n"
 
-            # Build conversation history (active path minus the just-added user message).
-            # For assistant turns, append citation metadata so follow-up questions
-            # ("describe source 1") can be answered accurately from context.
-            path = await get_active_path(conversation_id)
+            # Start title generation immediately for new conversations — runs in parallel
+            # with the full RAG pipeline so the title is ready before the answer finishes.
+            is_new_conversation = not body.conversation_id
+            title_task: asyncio.Task | None = (
+                asyncio.create_task(_generate_title(body.query))
+                if is_new_conversation
+                else None
+            )
+
+            # Parallelise: fetch conversation history + embed the query simultaneously.
+            # Both are independent of each other and together take max(db, embed) ms
+            # instead of db + embed ms — saves ~150ms on the critical path.
+            path, embedding = await asyncio.gather(
+                get_active_path(conversation_id),
+                rag._embed(body.query),
+            )
             history = [_msg_to_history(m) for m in path[:-1]]
 
+            # Title ran in parallel with embed+history — emit it now, before the answer
+            # starts, so the sidebar updates once and never changes.
+            if title_task is not None:
+                title = await title_task
+                if title:
+                    await update_title(conversation_id, user.user_id, title)
+                    yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
+
             # Classify: guideline lookup needed, or conversational reply?
+            # Heuristics handle obvious cases (greetings, ack) without an LLM call.
             mode = await rag.classify(body.query, history)
 
             # Stream response — both generators yield SSE-formatted strings
@@ -229,7 +257,8 @@ async def search_stream(
             generator = (
                 rag.stream_chat(body.query, user.user_id, history)
                 if mode == "chat"
-                else rag.stream_search(body.query, user.user_id, history)
+                # Pass pre-computed embedding so stream_search skips its own embed call
+                else rag.stream_search(body.query, user.user_id, history, precomputed_embedding=embedding)
             )
 
             async for chunk in generator:
@@ -265,14 +294,6 @@ async def search_stream(
                 evidence_grade=evidence_grade,
             )
             yield f"event: done\ndata: {_json.dumps({'assistant_message_id': assistant_msg['id']})}\n\n"
-
-            # Generate title on first exchange — emit via SSE so sidebar updates instantly
-            convo = await get_conversation(conversation_id, user.user_id)
-            if convo and not convo.get("title"):
-                title = await _generate_title(body.query)
-                if title:
-                    await update_title(conversation_id, user.user_id, title)
-                    yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
 
         except Exception as exc:
             import json as _json
