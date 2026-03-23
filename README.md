@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # Qwiva
 
@@ -107,8 +107,8 @@ Qwiva: The Kenya National Guidelines for Management of Malaria (MoH, 2022)
 ## RAG Pipeline
 
 | Stage | Implementation | Detail |
-|---|---|---|
-| **Embed** | `text-embedding-3-small` | 1536-dim via NVIDIA hub |
+|-------|---------------|--------|
+| **Embed** | `text-embedding-3-small` | 1536-dim via OpenAI direct |
 | **Vector search** | Qdrant HNSW | cosine similarity, top-12 |
 | **Full-text search** | Supabase `wfts` | websearch operator, top-12 |
 | **Merge** | Reciprocal Rank Fusion | k=60, deduplicates across both lists |
@@ -127,7 +127,7 @@ Qwiva: The Kenya National Guidelines for Management of Malaria (MoH, 2022)
 - Python 3.11+, [`uv`](https://github.com/astral-sh/uv)
 - Node.js 18+
 - Supabase project with the schema from `supabase/migrations/`
-- NVIDIA API key (covers embeddings, LLM, and reranker)
+- Anthropic API key, OpenAI API key, Groq API key, NVIDIA API key
 - Qdrant cloud cluster (or local)
 
 ### Backend
@@ -160,11 +160,11 @@ npm run dev
 
 Run migrations in order against your Supabase project:
 
-```bash
-# In the Supabase SQL editor, run in sequence:
-supabase/migrations/000_initial_schema.sql   # documents_v2, pgvector, FTS
-supabase/migrations/001_metadata_optimisation.sql
-supabase/migrations/002_chat_history.sql     # conversations, messages, RPCs
+```sql
+-- In the Supabase SQL editor, run in sequence:
+-- supabase/migrations/000_initial_schema.sql   (documents_v2, pgvector, FTS)
+-- supabase/migrations/001_metadata_optimisation.sql
+-- supabase/migrations/002_chat_history.sql     (conversations, messages, RPCs)
 ```
 
 ---
@@ -174,18 +174,19 @@ supabase/migrations/002_chat_history.sql     # conversations, messages, RPCs
 ### Backend (`.env`)
 
 | Variable | Required | Description |
-|---|---|---|
+|----------|----------|-------------|
 | `SUPABASE_URL` | ✓ | Project URL from Supabase dashboard |
 | `SUPABASE_SERVICE_KEY` | ✓ | Service role key (never expose to frontend) |
 | `SUPABASE_JWT_SECRET` | ✓ | Legacy JWT secret — Settings → API → JWT Secret |
-| `ANTHROPIC_API_KEY` | ✓ | Used for LLM generation (`claude-haiku-4-5-20251001` default) |
-| `GROQ_API_KEY` | ✓ | Used for classify, title generation, and follow-up suggestions |
-| `NVIDIA_API_KEY` | ✓ | Used for embeddings and reranker |
-| `NVIDIA_API_BASE` | ✓ | `https://inference-api.nvidia.com/v1/` |
+| `ANTHROPIC_API_KEY` | ✓ | LLM generation (`claude-sonnet-4-6` default) |
+| `OPENAI_API_KEY` | ✓ | Embeddings (`text-embedding-3-small`) |
+| `GROQ_API_KEY` | ✓ | Classify, title generation, follow-up suggestions |
+| `NVIDIA_API_KEY` | ✓ | Reranker only |
+| `NVIDIA_API_BASE` | | Default: `https://inference-api.nvidia.com/v1/` |
 | `QDRANT_URL` | ✓ | Qdrant cluster URL |
 | `QDRANT_API_KEY` | ✓ | Qdrant API key |
 | `QDRANT_COLLECTION` | | Default: `qwiva_docs` |
-| `LITELLM_MODEL` | | Default: `anthropic/claude-haiku-4-5-20251001` |
+| `LITELLM_MODEL` | | Default: `anthropic/claude-sonnet-4-6` |
 | `CLASSIFY_MODEL` | | Default: `groq/llama-3.3-70b-versatile` |
 | `FRONTEND_URL` | | CORS origin for your deployed frontend |
 | `LANGFUSE_PUBLIC_KEY` | | Optional — enables LLM tracing via Langfuse |
@@ -194,7 +195,7 @@ supabase/migrations/002_chat_history.sql     # conversations, messages, RPCs
 ### Frontend (`frontend/.env.local`)
 
 | Variable | Description |
-|---|---|
+|----------|-------------|
 | `NEXT_PUBLIC_API_URL` | Backend URL, e.g. `https://your-backend.onrender.com` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (public) key |
@@ -239,7 +240,7 @@ python -m evals.run_evals --skip-pipeline --report evals/reports/20260319T220425
 **Metrics collected:**
 
 | Category | Metrics |
-|---|---|
+|----------|---------|
 | **Latency** | p50 / p95 per stage: embed, retrieval, rerank, TTFT, total |
 | **RAG quality** | Faithfulness, answer relevancy, context precision, context recall (RAGAS) |
 | **Hallucination** | Hallucination score, contextual precision/recall (DeepEval) |
@@ -324,7 +325,7 @@ cd frontend && npx tsc --noEmit
 
 ## Key design decisions
 
-**Split provider strategy** — Groq LPU for latency-sensitive calls (classify, title, suggestions ~50–150ms), Anthropic for generation quality, NVIDIA for embeddings and reranker.
+**Split provider strategy** — Groq LPU for latency-sensitive calls (classify, title, suggestions ~50–150ms), Anthropic for generation quality, NVIDIA for reranker only, OpenAI for embeddings.
 
 **JWT auth** — Supabase HS256 tokens verified locally on the backend using `SUPABASE_JWT_SECRET`. No external call on every request.
 
@@ -353,7 +354,6 @@ The knowledge base contains **82,000+ chunks** from:
 - Kenya Essential Medicines List
 - Kenya Basic Paediatric Protocols (5th Edition)
 - WHO treatment guidelines (malaria, TB, HIV, nutrition, maternal health)
-- RCOG, specialist society guidelines relevant to the Kenyan clinical context
+- RCOG and specialist society guidelines relevant to the Kenyan clinical context
 
 All documents are chunked, embedded with `text-embedding-3-small` (1536-dim), and indexed in both Qdrant (HNSW cosine) and Supabase (tsvector FTS).
-]]>
