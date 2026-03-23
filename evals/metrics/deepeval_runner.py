@@ -39,14 +39,14 @@ async def run_deepeval(
         return DeepEvalReport(0, 0, 0, 0, 0)
 
     class _LiteLLMJudge(DeepEvalBaseLLM):
-        """DeepEvalBaseLLM subclass that routes through LiteLLM → NVIDIA hub."""
+        """DeepEvalBaseLLM subclass that routes through LiteLLM (Groq by default)."""
 
         def __init__(self, model: str, api_key: str, api_base: str):
             import asyncio
             self._model = model
             self._api_key = api_key
             self._api_base = api_base
-            self._sem = asyncio.Semaphore(3)  # cap concurrent NVIDIA hub judge calls
+            self._sem = asyncio.Semaphore(3)
             super().__init__(model)
 
         def get_model_name(self) -> str:
@@ -62,13 +62,10 @@ async def run_deepeval(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
                 api_key=self._api_key,
-                api_base=self._api_base,
             )
             text = resp.choices[0].message.content
             if schema is None:
                 return text
-            # Non-native model path: return schema instance directly (no tuple).
-            # Use raw_decode so trailing text/newlines after the JSON don't crash.
             try:
                 clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
                 obj, _ = json.JSONDecoder().raw_decode(clean.strip())
@@ -97,8 +94,6 @@ async def run_deepeval(
             text = resp.choices[0].message.content
             if schema is None:
                 return text
-            # Non-native model path: return schema instance directly (no tuple).
-            # Use raw_decode so trailing text/newlines after the JSON don't crash.
             try:
                 clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
                 obj, _ = json.JSONDecoder().raw_decode(clean.strip())
