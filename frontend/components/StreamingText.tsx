@@ -61,8 +61,10 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
             const firstIdx = parseInt(n.split('-')[0])
             const citation = citations?.find(c => c.index === firstIdx)
 
-            // Fallback: plain numbered circle before citations event arrives
-            if (!citation) {
+            // While streaming, always show a plain circle — the ReactMarkdown tree
+            // re-renders every 16ms (character drain), which destroys CSS group-hover
+            // state mid-interaction. Stable interactive pills only appear once done.
+            if (isStreaming || !citation) {
               return (
                 <sup>
                   <span className="inline-flex items-center justify-center w-4 h-4 ml-0.5 text-[9px] font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 rounded-full cursor-default select-none">
