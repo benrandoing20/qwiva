@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+node_modules
+frontend/.next
+frontend/node_modules
+evals/reports
+.env
+.env.local
+uv.lock

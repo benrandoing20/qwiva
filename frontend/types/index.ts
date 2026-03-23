@@ -4,6 +4,9 @@ export interface Citation {
   section: string
   year: string
   publisher: string
+  source_url?: string
+  excerpt?: string         // 400-char display excerpt
+  source_content?: string  // full retrieved chunk — shown in hover tooltip
 }
 
 export interface CitationsPayload {
@@ -22,6 +25,7 @@ export type SSEEvent =
   | { event: 'token'; data: TokenPayload }
   | { event: 'done'; data: { assistant_message_id: string } }
   | { event: 'title'; data: { conversation_id: string; title: string } }
+  | { event: 'suggestions'; data: { suggestions: string[] } }
   | { event: 'error'; data: { detail: string } }
 
 export type SearchStatus = 'idle' | 'searching' | 'streaming' | 'done' | 'error'
@@ -45,6 +49,7 @@ export interface Conversation {
 
 export interface ChatMessage {
   id: string
+  stableKey?: string  // set once at creation, never changed — used as React key to prevent remounts
   role: 'user' | 'assistant'
   content: string
   citations?: Citation[]
@@ -52,4 +57,5 @@ export interface ChatMessage {
   isStreaming?: boolean
   isError?: boolean
   statusMessage?: string
+  suggestions?: string[]
 }

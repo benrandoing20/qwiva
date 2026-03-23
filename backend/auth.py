@@ -26,15 +26,10 @@ def verify_token(
             algorithms=["HS256"],
             options={"require": ["sub", "exp"], "verify_aud": False},
         )
-    except jwt.ExpiredSignatureError:
+    except (jwt.ExpiredSignatureError, jwt.PyJWTError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired.",
-        )
-    except jwt.PyJWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {exc}",
+            detail="Unauthorized",
         )
 
     return UserProfile(
