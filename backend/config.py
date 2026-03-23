@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +53,15 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     dense_weight: float = 0.6   # must sum to 1.0 with sparse_weight
     sparse_weight: float = 0.4
+
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self) -> "Settings":
+        total = round(self.dense_weight + self.sparse_weight, 10)
+        if total != 1.0:
+            raise ValueError(
+                f"dense_weight + sparse_weight must equal 1.0, got {total}"
+            )
+        return self
 
 
 @lru_cache

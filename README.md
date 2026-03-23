@@ -298,7 +298,6 @@ qwiva/
 │   └── 002_chat_history.sql         # conversations, messages, get_active_path RPC
 │
 ├── Dockerfile            # python:3.12-slim, uv install, uvicorn
-├── railway.toml          # Render deploy config (via Dockerfile)
 ├── pyproject.toml        # Dependencies, black + ruff config
 └── .env.example          # All required environment variables
 ```

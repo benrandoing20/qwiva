@@ -92,6 +92,14 @@ export default function HomePage() {
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const lastAssistantIdRef = useRef<string | null>(null)
+  // Mirrors activeConversationId as a ref so async stream closures can read the
+  // current value without capturing a stale closure.
+  const activeConversationIdRef = useRef<string | null>(null)
+  // Background streams: conversations that finished loading while the user was elsewhere.
+  const [backgroundDone, setBackgroundDone] = useState<{ conversationId: string; title: string }[]>([])
+  // Generation counter: incremented on each new search so the previous stream's
+  // finally block doesn't clobber isLoading for a newly started stream.
+  const streamGenRef = useRef(0)
 
   // ------------------------------------------------------------------
   // Auth guard + initial conversation load
@@ -104,13 +112,18 @@ export default function HomePage() {
         if (!token) { router.push('/auth/login'); return }
         const convs = await fetchConversations(token)
         setConversations(convs)
-      } catch {
-        // non-fatal — sidebar just stays empty
+      } catch (err) {
+        console.error('Failed to load conversations:', err)
       } finally {
         setSidebarLoading(false)
       }
     })
   }, [router])
+
+  // Keep ref in sync so async closures can read the current conversation id
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId
+  }, [activeConversationId])
 
   // ------------------------------------------------------------------
   // Scroll: only when a NEW message is added — never during token streaming
@@ -190,8 +203,8 @@ export default function HomePage() {
       if (!token) return
       const convs = await fetchConversations(token)
       setConversations(convs)
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.error('Failed to refresh conversations:', err)
     }
   }
 
@@ -209,8 +222,8 @@ export default function HomePage() {
         setMessages([])
         lastAssistantIdRef.current = null
       }
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.error('Failed to delete conversation:', err)
     }
   }
 
@@ -224,6 +237,10 @@ export default function HomePage() {
 
     const token = await getAccessToken()
     if (!token) { router.push('/auth/login'); return }
+
+    // Increment generation so this stream "owns" isLoading
+    streamGenRef.current += 1
+    const myGen = streamGenRef.current
 
     // Optimistic user message
     const tempUserId = `temp-${Date.now()}`
@@ -332,6 +349,21 @@ export default function HomePage() {
           )
           // Capture real DB id for use as parent_message_id on next turn
           lastAssistantIdRef.current = event.data.assistant_message_id
+
+          // If user navigated away during streaming, show a notification bubble
+          if (realConversationId && activeConversationIdRef.current !== realConversationId) {
+            setConversations((prev) => {
+              const conv = prev.find((c) => c.id === realConversationId)
+              setBackgroundDone((bd) => {
+                if (bd.some((b) => b.conversationId === realConversationId)) return bd
+                return [...bd, {
+                  conversationId: realConversationId!,
+                  title: conv?.title ?? 'Your search',
+                }]
+              })
+              return prev
+            })
+          }
         } else if (event.event === 'title') {
           setConversations((prev) => {
             const exists = prev.some((c) => c.id === event.data.conversation_id)
@@ -374,7 +406,8 @@ export default function HomePage() {
         ),
       )
     } finally {
-      setIsLoading(false)
+      // Only clear isLoading if this is still the current stream
+      if (streamGenRef.current === myGen) setIsLoading(false)
     }
   }
 
@@ -475,6 +508,59 @@ export default function HomePage() {
           </div>
         </main>
       </div>
+
+      {/* Background stream notifications */}
+      {backgroundDone.length > 0 && (
+        <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-2">
+          {backgroundDone.map((item) => (
+            <BackgroundDoneToast
+              key={item.conversationId}
+              item={item}
+              onNavigate={(id) => {
+                handleSelectConversation(id)
+                setBackgroundDone((prev) => prev.filter((b) => b.conversationId !== id))
+              }}
+              onDismiss={(id) => setBackgroundDone((prev) => prev.filter((b) => b.conversationId !== id))}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Background stream notification bubble
+// ---------------------------------------------------------------------------
+function BackgroundDoneToast({
+  item,
+  onNavigate,
+  onDismiss,
+}: {
+  item: { conversationId: string; title: string }
+  onNavigate: (id: string) => void
+  onDismiss: (id: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-2.5 bg-[#1a1a1a] border border-teal-500/30 rounded-xl px-3.5 py-2.5 shadow-xl max-w-xs">
+      <div className="w-2 h-2 rounded-full bg-teal-500 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] text-[#6b6b6b] mb-0.5">Answer ready</p>
+        <p className="text-xs text-[#e8e8e8] truncate">{item.title}</p>
+      </div>
+      <button
+        onClick={() => onNavigate(item.conversationId)}
+        className="text-xs text-teal-400 hover:text-teal-300 transition-colors flex-shrink-0"
+      >
+        View →
+      </button>
+      <button
+        onClick={() => onDismiss(item.conversationId)}
+        className="text-[#4a4a4a] hover:text-[#9a9a9a] transition-colors flex-shrink-0 ml-0.5"
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
     </div>
   )
 }

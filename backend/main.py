@@ -69,8 +69,8 @@ app.add_middleware(
     allow_origins=[_settings.frontend_url, "http://localhost:3000"],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -211,11 +211,22 @@ def _msg_to_history(m: dict) -> dict:
     return {"role": m["role"], "content": content}
 
 
+_MAX_QUERY_LEN = 2000
+
+
 @app.post("/search/stream")
 async def search_stream(
     body: SearchRequest,
     user: UserProfile = Depends(verify_token),
 ) -> StreamingResponse:
+    if len(body.query.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Query must not be empty.")
+    if len(body.query) > _MAX_QUERY_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Query exceeds maximum length of {_MAX_QUERY_LEN} characters.",
+        )
+
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
             conversation_id = body.conversation_id
