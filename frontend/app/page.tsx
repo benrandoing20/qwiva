@@ -34,19 +34,14 @@ function renumberByAppearance(
     if (!order.includes(n)) order.push(n)
   }
 
-  // Build old → new index map
+  // Build old → new index map — only for citations actually referenced inline
   const remap: Record<number, number> = {}
   order.forEach((oldIdx, i) => { remap[oldIdx] = i + 1 })
-  // Any citations not cited in text get appended in original order
-  citations.forEach((c) => {
-    if (!(c.index in remap)) {
-      remap[c.index] = Object.keys(remap).length + 1
-    }
-  })
 
   const newAnswer = answer.replace(/\[(\d+)\]/g, (_, n) => `[${remap[parseInt(n)] ?? n}]`)
   const newCitations = citations
-    .map((c) => ({ ...c, index: remap[c.index] ?? c.index }))
+    .filter((c) => c.index in remap)
+    .map((c) => ({ ...c, index: remap[c.index] }))
     .sort((a, b) => a.index - b.index)
 
   return { answer: newAnswer, citations: newCitations }
@@ -232,7 +227,7 @@ export default function HomePage() {
 
     // Optimistic user message
     const tempUserId = `temp-${Date.now()}`
-    const userMsg: ChatMessage = { id: tempUserId, role: 'user', content: query }
+    const userMsg: ChatMessage = { id: tempUserId, stableKey: tempUserId, role: 'user', content: query }
     setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
 
@@ -240,6 +235,7 @@ export default function HomePage() {
     const tempAssistantId = `temp-assistant-${Date.now()}`
     const assistantMsg: ChatMessage = {
       id: tempAssistantId,
+      stableKey: tempAssistantId,
       role: 'assistant',
       content: '',
       isStreaming: true,
@@ -250,6 +246,22 @@ export default function HomePage() {
     let realConversationId: string | null = activeConversationId
     let realUserMessageId: string | null = null
     let pendingSuggestions: string[] = []
+
+    // Token buffer — accumulate tokens and flush every animation frame (~16ms)
+    // instead of calling setMessages on every single token (30–50x/sec with fast models)
+    let tokenBuffer = ''
+    let rafId: number | null = null
+    const flushTokens = () => {
+      if (!tokenBuffer) return
+      const toFlush = tokenBuffer
+      tokenBuffer = ''
+      rafId = null
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempAssistantId ? { ...m, content: m.content + toFlush } : m,
+        ),
+      )
+    }
 
     try {
       for await (const event of streamSearch(
@@ -267,22 +279,8 @@ export default function HomePage() {
               m.id === tempUserId ? { ...m, id: realUserMessageId! } : m,
             ),
           )
-          // New conversation — insert into sidebar with a blank title placeholder.
-          // The real AI-generated title arrives via the `title` SSE event shortly after
-          // (generated in parallel with the answer, so it's ready before streaming ends).
-          if (!activeConversationId) {
-            const now = new Date().toISOString()
-            setConversations((prev) => [
-              {
-                id: realConversationId!,
-                title: null,
-                title_generated: false,
-                created_at: now,
-                updated_at: now,
-              },
-              ...prev,
-            ])
-          }
+          // Don't add to sidebar yet — wait for the title SSE event so it appears
+          // with the real title already set (no empty → title flash).
         } else if (event.event === 'status') {
           setMessages((prev) =>
             prev.map((m) =>
@@ -304,21 +302,22 @@ export default function HomePage() {
             ),
           )
         } else if (event.event === 'token') {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempAssistantId
-                ? { ...m, content: m.content + event.data.token }
-                : m,
-            ),
-          )
+          tokenBuffer += event.data.token
+          if (!rafId) rafId = requestAnimationFrame(flushTokens)
         } else if (event.event === 'suggestions') {
           pendingSuggestions = event.data.suggestions
         } else if (event.event === 'done') {
+          // Cancel any pending rAF flush and fold buffered tokens directly into
+          // this update — single atomic render, no double-flash.
+          if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+          const pendingTokens = tokenBuffer
+          tokenBuffer = ''
           setMessages((prev) =>
             prev.map((m) => {
               if (m.id !== tempAssistantId) return m
+              const fullContent = m.content + pendingTokens
               const { answer, citations } = renumberByAppearance(
-                m.content,
+                fullContent,
                 m.citations ?? [],
               )
               return {
@@ -334,14 +333,27 @@ export default function HomePage() {
           // Capture real DB id for use as parent_message_id on next turn
           lastAssistantIdRef.current = event.data.assistant_message_id
         } else if (event.event === 'title') {
-          // Title arrived — update sidebar in place without a full refresh
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === event.data.conversation_id
-                ? { ...c, title: event.data.title }
-                : c,
-            ),
-          )
+          setConversations((prev) => {
+            const exists = prev.some((c) => c.id === event.data.conversation_id)
+            if (exists) {
+              // Existing conversation — update title in place
+              return prev.map((c) =>
+                c.id === event.data.conversation_id ? { ...c, title: event.data.title } : c,
+              )
+            }
+            // New conversation — add to sidebar now that we have the real title
+            const now = new Date().toISOString()
+            return [
+              {
+                id: event.data.conversation_id,
+                title: event.data.title,
+                title_generated: true,
+                created_at: now,
+                updated_at: now,
+              },
+              ...prev,
+            ]
+          })
         } else if (event.event === 'error') {
           setMessages((prev) =>
             prev.map((m) =>
@@ -428,7 +440,7 @@ export default function HomePage() {
                 style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
               >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.id} message={msg} onSuggest={handleSearch} />
+                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSearch} />
                 ))}
                 <div ref={bottomRef} />
               </div>
@@ -473,7 +485,7 @@ export default function HomePage() {
 function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: (q: string) => void }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end animate-fadeIn">
+      <div className={`flex justify-end${message.stableKey ? ' animate-fadeIn' : ''}`}>
         <div className="max-w-[80%] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 text-sm text-[#e8e8e8] leading-relaxed whitespace-pre-wrap">
           {message.content}
         </div>
@@ -484,28 +496,22 @@ function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: 
   // Assistant message
   if (message.isError) {
     return (
-      <div className="w-full">
+      <div className={`w-full${message.stableKey ? ' animate-fadeIn' : ''}`}>
         <p className="text-sm text-red-400 py-2">{message.content}</p>
       </div>
     )
   }
 
-  // Show animated indicator while waiting for first token
-  if (message.isStreaming && !message.content) {
-    return (
-      <div className="w-full">
-        <ThinkingIndicator message={message.statusMessage ?? 'Searching guidelines…'} />
-      </div>
-    )
-  }
-
+  // Always render AnswerCard — it handles the empty/thinking state internally.
+  // This avoids a DOM swap when the first token arrives, which causes layout jitter.
   return (
-    <div className="w-full animate-fadeIn">
+    <div className={`w-full${message.stableKey ? ' animate-fadeIn' : ''}`}>
       <AnswerCard
         answer={message.content}
         citations={message.citations ?? []}
         isStreaming={message.isStreaming ?? false}
         isDone={!message.isStreaming}
+        statusMessage={message.statusMessage}
         suggestions={message.suggestions}
         onSuggest={onSuggest}
       />

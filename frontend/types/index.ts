@@ -5,6 +5,8 @@ export interface Citation {
   year: string
   publisher: string
   source_url?: string
+  excerpt?: string         // 400-char display excerpt
+  source_content?: string  // full retrieved chunk — shown in hover tooltip
 }
 
 export interface CitationsPayload {
@@ -47,6 +49,7 @@ export interface Conversation {
 
 export interface ChatMessage {
   id: string
+  stableKey?: string  // set once at creation, never changed — used as React key to prevent remounts
   role: 'user' | 'assistant'
   content: string
   citations?: Citation[]

@@ -1,6 +1,23 @@
 import asyncio
 from collections.abc import AsyncGenerator
 
+# ---------------------------------------------------------------------------
+# Compatibility patch: litellm passes sdk_integration= to Langfuse.__init__
+# for langfuse >= 2.6.0, but langfuse 4.x removed that parameter.
+# Patch the class before anything imports it so the kwarg is silently dropped.
+# ---------------------------------------------------------------------------
+try:
+    import langfuse as _langfuse
+    _orig_lf_init = _langfuse.Langfuse.__init__
+
+    def _patched_lf_init(self, *args, **kwargs):
+        kwargs.pop("sdk_integration", None)
+        _orig_lf_init(self, *args, **kwargs)
+
+    _langfuse.Langfuse.__init__ = _patched_lf_init
+except Exception:
+    pass
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -38,9 +55,10 @@ app = FastAPI(title="Qwiva API", version="0.1.0")
 async def startup() -> None:
     """Pre-warm all clients so the first request doesn't pay initialisation cost."""
     # Touch all @cached_property clients — this constructs them once and caches them
-    _ = rag._openai   # embedding client (AsyncOpenAI → NVIDIA hub)
-    _ = rag._http     # reranker HTTP client (httpx.AsyncClient)
-    _ = rag._extra_kwargs  # LiteLLM kwargs dict
+    _ = rag._openai        # embedding client (AsyncOpenAI direct)
+    _ = rag._http          # reranker HTTP client (httpx.AsyncClient)
+    _ = rag._extra_kwargs  # generation LiteLLM kwargs (Anthropic)
+    _ = rag._classify_kwargs  # classify/suggestions LiteLLM kwargs (Groq)
     if rag._settings.qdrant_url:
         _ = rag._qdrant  # Qdrant async client
     await get_db()  # Supabase connection pool
@@ -185,8 +203,9 @@ def _msg_to_history(m: dict) -> dict:
                     line += f" — {c['publisher']}"
                 if c.get("year"):
                     line += f" · {c['year']}"
-                if c.get("excerpt"):
-                    line += f"\n    Excerpt: {c['excerpt']}"
+                body = c.get("source_content") or c.get("excerpt")
+                if body:
+                    line += f"\n    Content: {body}"
                 lines.append(line)
             content = f"{content}\n\nReferenced sources:\n" + "\n".join(lines)
     return {"role": m["role"], "content": content}
@@ -219,6 +238,9 @@ async def search_stream(
             import json as _json
             yield f"event: conversation\ndata: {_json.dumps({'conversation_id': conversation_id, 'user_message_id': user_message_id})}\n\n"
 
+            # "Thinking…" is the first visible status — covers the gather + classify wait.
+            yield f"event: status\ndata: {_json.dumps({'message': 'Thinking…'})}\n\n"
+
             # Start title generation immediately for new conversations — runs in parallel
             # with the full RAG pipeline so the title is ready before the answer finishes.
             is_new_conversation = not body.conversation_id
@@ -241,9 +263,8 @@ async def search_stream(
             # starts, so the sidebar updates once and never changes.
             if title_task is not None:
                 title = await title_task
-                if title:
-                    await update_title(conversation_id, user.user_id, title)
-                    yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
+                await update_title(conversation_id, user.user_id, title)
+                yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
 
             # Classify: guideline lookup needed, or conversational reply?
             # Heuristics handle obvious cases (greetings, ack) without an LLM call.
@@ -286,11 +307,20 @@ async def search_stream(
             # Persist assistant response and emit its ID so the client
             # can use it as parent_message_id for the next turn.
             answer = "".join(tokens)
+
+            # Filter citations to only those actually referenced inline in the answer.
+            # The citations event was sent upfront with all retrieved chunks; here we
+            # strip any that the LLM never cited so they don't appear in stored history
+            # or the Sources panel after renumbering.
+            import re as _re
+            cited_indices = {int(m) for m in _re.findall(r'\[(\d+)\]', answer)}
+            cited_citations = [c for c in citations if c.index in cited_indices]
+
             assistant_msg = await append_assistant_message(
                 conversation_id=conversation_id,
                 parent_id=user_message_id,
                 content=answer,
-                citations=citations,
+                citations=cited_citations,
                 evidence_grade=evidence_grade,
             )
             yield f"event: done\ndata: {_json.dumps({'assistant_message_id': assistant_msg['id']})}\n\n"
@@ -314,13 +344,13 @@ async def search_stream(
 # ---------------------------------------------------------------------------
 
 
-async def _generate_title(first_query: str) -> str | None:
-    """Generate a short conversation title from the first user query. Returns None on failure."""
+async def _generate_title(first_query: str) -> str:
+    """Generate a short conversation title using Groq. Falls back to truncated query."""
     try:
         import litellm
 
         resp = await litellm.acompletion(
-            model=_settings.litellm_model,
+            model=_settings.classify_model,
             messages=[
                 {
                     "role": "user",
@@ -332,10 +362,15 @@ async def _generate_title(first_query: str) -> str | None:
                 }
             ],
             max_tokens=20,
-            api_key=_settings.nvidia_api_key,
-            api_base=_settings.nvidia_api_base,
+            api_key=_settings.groq_api_key,
         )
         title = resp.choices[0].message.content.strip().strip('"').strip("'")
-        return title or None
-    except Exception:
-        return None
+        if title:
+            return title
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Title generation failed: %s", exc)
+
+    # Fallback: first 6 words of the query
+    words = first_query.strip().split()
+    return " ".join(words[:6]) + ("…" if len(words) > 6 else "")

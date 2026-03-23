@@ -5,7 +5,7 @@ Pipeline (per query):
   1. Embed query        → text-embedding-3-small via NVIDIA hub
   2. Hybrid retrieval   → Qdrant vector search + Supabase FTS, Python RRF merge
   3. Rerank             → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 12 → top 5
-  4. Generate           → bedrock-claude-sonnet-4-6 via LiteLLM
+  4. Generate           → anthropic/claude-sonnet-4-6 via LiteLLM (prompt-cached)
   5. Stream             → SSE: status → citations → token → done
 """
 
@@ -87,32 +87,46 @@ State the evidence grade (Class I, IIa, IIb / Level A, B, C) if explicitly \
 present in the retrieved guidelines. Do not infer or assume a grade \
 not in the source.
 
-Honesty: If the provided guidelines do not address the question, say so clearly. \
-Do not extrapolate beyond the sources.
+Honesty: If the provided guidelines do not address the question, say so clearly \
+and flag which part cannot be answered from available sources. Do not extrapolate \
+beyond the sources. Never state a drug dose not explicitly present in the \
+retrieved guidelines — if absent, say so and direct the physician to the \
+appropriate formulary.
 
 Refer vs manage: For every management query include — even if not asked — \
-(1) what to do now with specific doses, (2) when and to whom to refer with \
-exact criteria, (3) what to do if referral is not immediately available.
+(1) what to do now with specific doses where available, \
+(2) when and to whom to refer with exact criteria, \
+(3) what to do if referral is not immediately available.
 
-Ambiguous queries: If the query lacks a presenting complaint, age, or setting, \
-ask one clarifying question before answering.
+Ambiguous queries: If the query lacks a presenting complaint, age, or clinical \
+setting, ask one clarifying question before answering. While asking, always \
+provide the universal immediate action bridge: \
+"While you clarify — if the patient is acutely unwell right now, follow ABCDE: \
+secure Airway, support Breathing, restore Circulation, assess Disability \
+(GCS and pupils), Expose and examine fully. Call for help immediately." \
+Do not generate specific clinical output until context is provided.
 
 Formatting rules — follow exactly:
-•⁠  ⁠Lead with named guideline + evidence grade (if available) + direct answer \
-  in 1–2 sentences. Frame as: "Per [guideline], [recommendation]" or \
-  "[Guideline] recommends..." — not "Start / Give / Use" without attribution.
-•⁠  ⁠Use *bold* for drug names, diagnoses, and critical values.
-•⁠  ⁠Use bullet points for criteria or options; use ☐ checklists for actionable steps.
-•⁠  ⁠DOSING: always present as a markdown table when doses are in the guidelines: \
-  | Drug | Starting Dose | Route | Frequency | Target Dose |
-•⁠  ⁠WARNINGS: prefix contraindications and safety thresholds with \
-  > *Warning:* on its own line with exact values.
-•⁠  ⁠SECTIONS: use ## headers only when covering clearly distinct topics. \
-  Avoid for short answers.
-•⁠  ⁠Citations: place [1] at the end of the sentence it supports. \
-  Only cite sources referenced inline — do not list unreferenced retrieved sources.
-•⁠  ⁠End with a one-line Kenya context note: name specific drugs on the KEML, \
-  flag what is unavailable, and state the guideline-supported alternative.
+- Lead with named guideline + evidence grade (if available) + direct answer \
+  in 1-2 sentences. Frame recommendations as: "Per [guideline], [recommendation]" \
+  or "[Guideline] recommends..." — not "Start / Give / Use" as standalone \
+  instructions without attribution.
+- Use **bold** for section headers, drug names, diagnoses, and critical values.
+- Use standard markdown only: numbered lists (1. 2. 3.) for ordered steps where \
+  sequence matters, bullet points ( - ) for criteria and conditions, tables for \
+  drug comparisons and dose thresholds, and a blockquote (>) for one critical \
+  safety point per section — state it directly as a fact without the word Warning \
+  or any prefix label. Use blockquotes sparingly. \
+  Do not use special symbols such as ☐ → ✓ ⚠️.
+- DOSING: present as a markdown table whenever doses appear in the retrieved \
+  guidelines: | Drug | Starting Dose | Route | Frequency | Notes |
+- Citations: place [1] at the end of the sentence or paragraph it supports. \
+  Only cite sources used inline in the response — do not list retrieved sources \
+  not referenced in the text.
+- End every response with a 🇰🇪 Kenya context note: name specific drugs on the \
+  KEML, flag what is unavailable, state the guideline-supported alternative, \
+  and note what to do if the recommended treatment or referral pathway is \
+  not accessible.
 """
 
 _USER_TEMPLATE = """\
@@ -121,8 +135,9 @@ Clinical question: {question}
 Relevant guideline excerpts:
 {sources}
 
-Answer using only the excerpts above. Place citations [1], [2], etc. at the end \
-of the sentence or paragraph they support — not after every clause.
+Answer using only the excerpts above. Place citations sparingly: one [n] at the \
+end of a paragraph or bullet group it supports — not after each individual sentence \
+or bullet.
 """
 
 _CHAT_SYSTEM_PROMPT = """\
@@ -131,6 +146,12 @@ Be concise and professional. Address the physician directly.
 
 You are responding to a conversational message or a follow-up that can be \
 answered from the conversation so far. Respond naturally and briefly.
+
+Vague presentations: If the physician states a patient's condition without a \
+specific clinical question (e.g. "my patient is unwell", "my patient has a fever"), \
+ask ONE targeted clarifying question to understand what guideline information they \
+need — e.g. "What specific aspect would you like guidance on — diagnosis, treatment, \
+dosing, or referral criteria?"
 
 Citation handling: if the user asks about a source from a previous response, \
 describe it exactly as listed in the "Referenced sources" section of that response. \
@@ -285,7 +306,7 @@ class QwivaRAG:
           5. event: suggestions  (3 follow-up question chips)
         """
         yield _sse("status", {"message": "Searching guidelines…"})
-        # Accept pre-computed embedding from main.py (saves one embed round-trip)
+        # Accept pre-computed embedding from main.py (saves one embed round-trip).
         embedding = precomputed_embedding or await self._embed(query)
 
         # --- semantic cache check ---
@@ -295,7 +316,7 @@ class QwivaRAG:
                 citations=cached.citations,
                 evidence_grade=cached.evidence_grade,
             ).model_dump())
-            yield _sse("status", {"message": "Generating answer…"})
+            yield _sse("status", {"message": "Generating response…"})
             # Stream cached answer in small chunks to preserve typewriter UX
             step = 8
             for i in range(0, len(cached.answer), step):
@@ -314,7 +335,7 @@ class QwivaRAG:
         citations_payload = CitationsPayload(citations=citations, evidence_grade=evidence_grade)
         yield _sse("citations", citations_payload.model_dump())
 
-        yield _sse("status", {"message": "Generating answer…"})
+        yield _sse("status", {"message": "Generating response…"})
         answer_parts: list[str] = []
         async for token in self._generate_stream(query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
@@ -498,16 +519,25 @@ class QwivaRAG:
 
         history_snippet = ""
         if history:
-            last_few = history[-4:]
+            last_few = history[-6:]
             history_snippet = "\n".join(
-                f"{m['role'].upper()}: {m['content'][:300]}" for m in last_few
+                f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
             )
 
         prompt = (
             "Classify this message for a clinical assistant.\n"
             "Reply with ONLY one word: rag OR chat\n\n"
-            "rag = needs clinical guideline lookup (treatments, diagnoses, dosing, protocols)\n"
-            "chat = greeting, thanks, small talk, or answerable from conversation history\n\n"
+            "rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
+            "chat = greeting, thanks, small talk, follow-up question about the previous answer, "
+            "or any question answerable from the conversation history above\n\n"
+            "Vague patient presentations without a specific clinical question "
+            "(e.g. \"my patient is unwell\", \"I have a patient with fever\") → chat, "
+            "so the assistant can ask what specific information is needed.\n\n"
+            "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
+            "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
+            "IMPORTANT: If the previous assistant turn already retrieved guideline sources AND the "
+            "current message asks for clarification, elaboration, or a follow-up on those sources, "
+            "classify as chat — do NOT trigger another RAG lookup.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
             + f"Message: {query}"
         )
@@ -587,7 +617,7 @@ class QwivaRAG:
         self, query: str, user_id: str, history: list[dict] | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream a direct response from conversation context — no RAG."""
-        yield _sse("status", {"message": "Thinking…"})
+        yield _sse("status", {"message": "Generating response…"})
         yield _sse("citations", CitationsPayload(citations=[], evidence_grade="").model_dump())
 
         history_messages = _trim_history(history or [])
@@ -627,30 +657,25 @@ class QwivaRAG:
 
     @cached_property
     def _extra_kwargs(self) -> dict:
-        """LiteLLM kwargs for the main generation model."""
+        """LiteLLM kwargs for the main generation model (Anthropic direct)."""
         extra: dict = {}
-        # Direct Anthropic path (prompt caching enabled)
-        if self._settings.anthropic_api_key and self._settings.litellm_model.startswith("anthropic/"):
+        if self._settings.anthropic_api_key:
             extra["api_key"] = self._settings.anthropic_api_key
-        elif self._settings.nvidia_api_key:
-            extra["api_key"] = self._settings.nvidia_api_key
-            if self._settings.nvidia_api_base:
-                extra["api_base"] = self._settings.nvidia_api_base
         return extra
 
     @cached_property
     def _classify_kwargs(self) -> dict:
-        """LiteLLM kwargs for the fast classify model (always NVIDIA hub)."""
+        """LiteLLM kwargs for classify + suggestions (Groq)."""
         extra: dict = {}
-        if self._settings.nvidia_api_key:
-            extra["api_key"] = self._settings.nvidia_api_key
-        if self._settings.nvidia_api_base:
-            extra["api_base"] = self._settings.nvidia_api_base
+        if self._settings.groq_api_key:
+            extra["api_key"] = self._settings.groq_api_key
         return extra
 
     @cached_property
     def _openai(self) -> AsyncOpenAI:
-        """Embeddings client — routed through the NVIDIA inference hub."""
+        """Embeddings client — uses OpenAI direct if openai_api_key is set, otherwise NVIDIA hub."""
+        if self._settings.openai_api_key:
+            return AsyncOpenAI(api_key=self._settings.openai_api_key)
         return AsyncOpenAI(
             api_key=self._settings.nvidia_api_key,
             base_url=self._settings.nvidia_api_base,
@@ -688,11 +713,18 @@ _CHAT_STARTERS = {
     "understood", "noted", "alright", "sounds good",
 }
 
+# Phrases that clearly reference prior conversation content — always route to chat
+_FOLLOWUP_STARTERS = {
+    "can you elaborate", "tell me more", "what about", "explain that",
+    "clarify", "what did source", "from the guidelines", "as you mentioned",
+    "earlier you said", "based on what you", "more detail", "expand on",
+    "could you expand", "can you explain", "what does source", "what does that mean",
+}
 
 def _quick_classify(query: str) -> str | None:
     """
     Heuristic pre-filter — avoids an LLM call for obvious cases.
-    Returns 'chat' if clearly conversational, None if ambiguous (use LLM).
+    Returns 'chat' if clearly conversational/follow-up, None if ambiguous (use LLM).
     """
     stripped = query.strip().lower().rstrip("!.,")
     # Single word or very short phrases that are clearly social
@@ -704,15 +736,27 @@ def _quick_classify(query: str) -> str | None:
         clinical_hints = {"dose", "mg", "treatment", "?", "how", "what", "when", "why", "which"}
         if not any(h in stripped for h in clinical_hints):
             return "chat"
+    # Queries that clearly reference prior context — no new retrieval needed
+    if any(stripped.startswith(p) for p in _FOLLOWUP_STARTERS):
+        return "chat"
     return None  # ambiguous — let the LLM decide
 
 
-def _trim_history(history: list[dict], max_turns: int = 6, max_chars: int = 8000) -> list[dict]:
-    """Return the most recent messages within a character budget."""
-    recent = history[-max_turns:]
+def _trim_history(
+    history: list[dict],
+    max_turns: int | None = None,
+    max_chars: int = 32_000,
+) -> list[dict]:
+    """Return as many recent messages as fit within the character budget.
+
+    max_turns is intentionally unlimited by default — the full conversation is
+    passed so the LLM retains context from early turns.  max_chars acts as a
+    safety valve against extreme conversation lengths.
+    """
+    pool = history[-max_turns:] if max_turns else history
     total = 0
     trimmed: list[dict] = []
-    for msg in reversed(recent):
+    for msg in reversed(pool):
         total += len(msg.get("content", ""))
         if total > max_chars:
             break
@@ -763,6 +807,7 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
                 publisher=chunk.publisher,
                 excerpt=chunk.content[:_EXCERPT_CHARS],
                 source_url=chunk.source_url,
+                source_content=chunk.content,
             ))
             idx += 1
 
