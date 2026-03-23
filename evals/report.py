@@ -1,7 +1,7 @@
 import json
 import pathlib
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def save_report(
@@ -12,7 +12,7 @@ def save_report(
     deepeval=None,
     output_dir: str = "evals/reports",
 ) -> str:
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     report = {
         "run_id": run_id,
         "n_questions": len(eval_results),
@@ -33,6 +33,7 @@ def save_report(
                 "n_reranked": len(r.reranked_chunks),
                 "n_citations": len(r.citations),
                 "latency_ms": {
+                    "classify": round(r.classify_ms, 1),
                     "embed": round(r.embed_ms, 1),
                     "retrieval": round(r.retrieval_ms, 1),
                     "rerank": round(r.rerank_ms, 1),
@@ -71,6 +72,7 @@ def _render_markdown(report: dict) -> str:
         "\n## Latency (ms)",
         "| Stage | p50 | p95 |",
         "|---|---|---|",
+        f"| Routing (classify) | {lat['classify_p50']} | {lat['classify_p95']} |",
         f"| Embed | {lat['embed_p50']} | {lat['embed_p95']} |",
         f"| Retrieval | {lat['retrieval_p50']} | {lat['retrieval_p95']} |",
         f"| Rerank | {lat['rerank_p50']} | {lat['rerank_p95']} |",

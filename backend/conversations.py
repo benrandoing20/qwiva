@@ -9,9 +9,55 @@ so every query must explicitly filter by user_id.
 from __future__ import annotations
 
 import json
+import time
+from typing import Any
 
 from backend.db import get_db
 from backend.models import Citation
+
+# ---------------------------------------------------------------------------
+# Lightweight in-process TTL cache for conversation lookups
+# ---------------------------------------------------------------------------
+# list_conversations and get_conversation are called on every route for auth
+# checks and sidebar loads. Caching them eliminates redundant DB round trips.
+# Mutations (create/delete/update_title) invalidate the relevant entries.
+
+_conv_list_cache: dict[str, tuple[float, list[dict]]] = {}  # user_id → (ts, data)
+_conv_cache: dict[tuple[str, str], tuple[float, dict | None]] = {}  # (conv_id, user_id) → (ts, data)
+
+_LIST_TTL = 30.0   # seconds — sidebar stays fresh enough
+_CONV_TTL = 300.0  # seconds — conversation metadata rarely changes
+
+
+def _conv_list_get(user_id: str) -> list[dict] | None:
+    entry = _conv_list_cache.get(user_id)
+    if entry and time.monotonic() - entry[0] < _LIST_TTL:
+        return entry[1]
+    return None
+
+
+def _conv_list_set(user_id: str, data: list[dict]) -> None:
+    _conv_list_cache[user_id] = (time.monotonic(), data)
+
+
+def _conv_list_invalidate(user_id: str) -> None:
+    _conv_list_cache.pop(user_id, None)
+
+
+def _conv_get(conv_id: str, user_id: str) -> tuple[bool, dict | None]:
+    """Returns (cache_hit, data)."""
+    entry = _conv_cache.get((conv_id, user_id))
+    if entry and time.monotonic() - entry[0] < _CONV_TTL:
+        return True, entry[1]
+    return False, None
+
+
+def _conv_set(conv_id: str, user_id: str, data: dict | None) -> None:
+    _conv_cache[(conv_id, user_id)] = (time.monotonic(), data)
+
+
+def _conv_invalidate(conv_id: str, user_id: str) -> None:
+    _conv_cache.pop((conv_id, user_id), None)
 
 
 # ---------------------------------------------------------------------------
@@ -22,10 +68,16 @@ from backend.models import Citation
 async def create_conversation(user_id: str) -> dict:
     db = await get_db()
     res = await db.table("conversations").insert({"user_id": user_id}).execute()
-    return res.data[0]
+    row = res.data[0]
+    _conv_list_invalidate(user_id)
+    _conv_set(row["id"], user_id, row)
+    return row
 
 
 async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
+    cached = _conv_list_get(user_id)
+    if cached is not None:
+        return cached
     db = await get_db()
     res = (
         await db.table("conversations")
@@ -35,10 +87,15 @@ async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
         .limit(limit)
         .execute()
     )
-    return res.data or []
+    data = res.data or []
+    _conv_list_set(user_id, data)
+    return data
 
 
 async def get_conversation(conversation_id: str, user_id: str) -> dict | None:
+    hit, cached = _conv_get(conversation_id, user_id)
+    if hit:
+        return cached
     db = await get_db()
     res = (
         await db.table("conversations")
@@ -48,7 +105,9 @@ async def get_conversation(conversation_id: str, user_id: str) -> dict | None:
         .maybe_single()
         .execute()
     )
-    return res.data
+    data = res.data
+    _conv_set(conversation_id, user_id, data)
+    return data
 
 
 async def update_title(conversation_id: str, user_id: str, title: str) -> None:
@@ -60,6 +119,9 @@ async def update_title(conversation_id: str, user_id: str, title: str) -> None:
         .eq("user_id", user_id)
         .execute()
     )
+    # Invalidate so next read gets the updated title
+    _conv_invalidate(conversation_id, user_id)
+    _conv_list_invalidate(user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -73,39 +135,46 @@ async def append_user_message(
     parent_id: str | None = None,
 ) -> dict:
     """
-    Insert a user message and update the parent's selected_child_id pointer.
-    If parent_id is provided and the parent already has a selected child,
-    this creates a new branch (branch_index > 0).
+    Insert a user message and update the parent's selected_child_id in one RPC call.
+    Collapsed from 3 sequential DB round trips (count + insert + update) into 1.
+    Requires Supabase function: append_user_message(p_conversation_id, p_content, p_parent_id).
+    Falls back to 3-call path if RPC is unavailable.
     """
     db = await get_db()
+    try:
+        res = await db.rpc("append_user_message", {
+            "p_conversation_id": conversation_id,
+            "p_content": content,
+            "p_parent_id": parent_id,
+        }).execute()
+        return res.data[0]
+    except Exception:
+        # Fallback: original 3-call path
+        branch_index = 0
+        if parent_id:
+            siblings = (
+                await db.table("messages")
+                .select("id", count="exact")
+                .eq("parent_id", parent_id)
+                .execute()
+            )
+            branch_index = siblings.count or 0
 
-    # Determine branch_index: count existing siblings
-    branch_index = 0
-    if parent_id:
-        siblings = (
-            await db.table("messages")
-            .select("id", count="exact")
-            .eq("parent_id", parent_id)
-            .execute()
-        )
-        branch_index = siblings.count or 0
+        res = await db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "parent_id": parent_id,
+            "role": "user",
+            "content": content,
+            "branch_index": branch_index,
+        }).execute()
+        message = res.data[0]
 
-    res = await db.table("messages").insert({
-        "conversation_id": conversation_id,
-        "parent_id": parent_id,
-        "role": "user",
-        "content": content,
-        "branch_index": branch_index,
-    }).execute()
-    message = res.data[0]
+        if parent_id:
+            await db.table("messages").update(
+                {"selected_child_id": message["id"]}
+            ).eq("id", parent_id).execute()
 
-    # Point parent's selected_child_id at the new message (activates this branch)
-    if parent_id:
-        await db.table("messages").update(
-            {"selected_child_id": message["id"]}
-        ).eq("id", parent_id).execute()
-
-    return message
+        return message
 
 
 async def append_assistant_message(
@@ -116,28 +185,40 @@ async def append_assistant_message(
     evidence_grade: str,
 ) -> dict:
     """
-    Insert the assistant response and link it as the active child of the user message.
+    Insert assistant response and update parent's selected_child_id in one RPC call.
+    Collapsed from 2 sequential DB round trips into 1.
+    Requires Supabase function: append_assistant_message(p_conversation_id, p_parent_id, p_content, p_citations, p_evidence_grade).
+    Falls back to 2-call path if RPC is unavailable.
     """
     db = await get_db()
+    citations_json = json.dumps([c.model_dump() for c in citations])
+    try:
+        res = await db.rpc("append_assistant_message", {
+            "p_conversation_id": conversation_id,
+            "p_parent_id": parent_id,
+            "p_content": content,
+            "p_citations": citations_json,
+            "p_evidence_grade": evidence_grade,
+        }).execute()
+        return res.data[0]
+    except Exception:
+        # Fallback: original 2-call path
+        res = await db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "parent_id": parent_id,
+            "role": "assistant",
+            "content": content,
+            "citations": citations_json,
+            "evidence_grade": evidence_grade,
+            "branch_index": 0,
+        }).execute()
+        message = res.data[0]
 
-    citations_json = [c.model_dump() for c in citations]
-    res = await db.table("messages").insert({
-        "conversation_id": conversation_id,
-        "parent_id": parent_id,
-        "role": "assistant",
-        "content": content,
-        "citations": json.dumps(citations_json),
-        "evidence_grade": evidence_grade,
-        "branch_index": 0,
-    }).execute()
-    message = res.data[0]
+        await db.table("messages").update(
+            {"selected_child_id": message["id"]}
+        ).eq("id", parent_id).execute()
 
-    # Point the user message at this assistant response
-    await db.table("messages").update(
-        {"selected_child_id": message["id"]}
-    ).eq("id", parent_id).execute()
-
-    return message
+        return message
 
 
 async def get_active_path(conversation_id: str) -> list[dict]:
@@ -172,3 +253,5 @@ async def delete_conversation(conversation_id: str, user_id: str) -> None:
         .eq("user_id", user_id)
         .execute()
     )
+    _conv_invalidate(conversation_id, user_id)
+    _conv_list_invalidate(user_id)

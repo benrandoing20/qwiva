@@ -1,4 +1,22 @@
+import asyncio
 from collections.abc import AsyncGenerator
+
+# ---------------------------------------------------------------------------
+# Compatibility patch: litellm passes sdk_integration= to Langfuse.__init__
+# for langfuse >= 2.6.0, but langfuse 4.x removed that parameter.
+# Patch the class before anything imports it so the kwarg is silently dropped.
+# ---------------------------------------------------------------------------
+try:
+    import langfuse as _langfuse
+    _orig_lf_init = _langfuse.Langfuse.__init__
+
+    def _patched_lf_init(self, *args, **kwargs):
+        kwargs.pop("sdk_integration", None)
+        _orig_lf_init(self, *args, **kwargs)
+
+    _langfuse.Langfuse.__init__ = _patched_lf_init
+except Exception:
+    pass
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,8 +53,15 @@ app = FastAPI(title="Qwiva API", version="0.1.0")
 
 @app.on_event("startup")
 async def startup() -> None:
-    """Pre-warm the Supabase connection so the first query doesn't pay init cost."""
-    await get_db()
+    """Pre-warm all clients so the first request doesn't pay initialisation cost."""
+    # Touch all @cached_property clients — this constructs them once and caches them
+    _ = rag._openai        # embedding client (AsyncOpenAI direct)
+    _ = rag._http          # reranker HTTP client (httpx.AsyncClient)
+    _ = rag._extra_kwargs  # generation LiteLLM kwargs (Anthropic)
+    _ = rag._classify_kwargs  # classify/suggestions LiteLLM kwargs (Groq)
+    if rag._settings.qdrant_url:
+        _ = rag._qdrant  # Qdrant async client
+    await get_db()  # Supabase connection pool
 
 
 app.add_middleware(
@@ -44,8 +69,8 @@ app.add_middleware(
     allow_origins=[_settings.frontend_url, "http://localhost:3000"],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -155,11 +180,53 @@ async def remove_conversation(
 # ---------------------------------------------------------------------------
 
 
+def _msg_to_history(m: dict) -> dict:
+    """Convert a DB message row to an LLM history entry.
+
+    For assistant messages, append citation metadata as plain text so the model
+    can answer follow-up questions like "describe source 1" without hallucinating.
+    """
+    import json as _json
+
+    content = m["content"] or ""
+    if m["role"] == "assistant" and m.get("citations"):
+        raw = m["citations"]
+        try:
+            cits = _json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except Exception:
+            cits = []
+        if cits:
+            lines = []
+            for c in cits:
+                line = f"[{c['index']}] {c['guideline_title']}"
+                if c.get("publisher"):
+                    line += f" — {c['publisher']}"
+                if c.get("year"):
+                    line += f" · {c['year']}"
+                body = c.get("source_content") or c.get("excerpt")
+                if body:
+                    line += f"\n    Content: {body}"
+                lines.append(line)
+            content = f"{content}\n\nReferenced sources:\n" + "\n".join(lines)
+    return {"role": m["role"], "content": content}
+
+
+_MAX_QUERY_LEN = 2000
+
+
 @app.post("/search/stream")
 async def search_stream(
     body: SearchRequest,
     user: UserProfile = Depends(verify_token),
 ) -> StreamingResponse:
+    if len(body.query.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Query must not be empty.")
+    if len(body.query) > _MAX_QUERY_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Query exceeds maximum length of {_MAX_QUERY_LEN} characters.",
+        )
+
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
             conversation_id = body.conversation_id
@@ -182,17 +249,56 @@ async def search_stream(
             import json as _json
             yield f"event: conversation\ndata: {_json.dumps({'conversation_id': conversation_id, 'user_message_id': user_message_id})}\n\n"
 
-            # Run RAG pipeline — collect tokens while streaming to client
+            # "Thinking…" is the first visible status — covers the gather + classify wait.
+            yield f"event: status\ndata: {_json.dumps({'message': 'Thinking…'})}\n\n"
+
+            # Start title generation immediately for new conversations — runs in parallel
+            # with the full RAG pipeline so the title is ready before the answer finishes.
+            is_new_conversation = not body.conversation_id
+            title_task: asyncio.Task | None = (
+                asyncio.create_task(_generate_title(body.query))
+                if is_new_conversation
+                else None
+            )
+
+            # Parallelise: fetch conversation history + embed the query simultaneously.
+            # Both are independent of each other and together take max(db, embed) ms
+            # instead of db + embed ms — saves ~150ms on the critical path.
+            path, embedding = await asyncio.gather(
+                get_active_path(conversation_id),
+                rag._embed(body.query),
+            )
+            history = [_msg_to_history(m) for m in path[:-1]]
+
+            # Title ran in parallel with embed+history — emit it now, before the answer
+            # starts, so the sidebar updates once and never changes.
+            if title_task is not None:
+                title = await title_task
+                await update_title(conversation_id, user.user_id, title)
+                yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
+
+            # Classify: guideline lookup needed, or conversational reply?
+            # Heuristics handle obvious cases (greetings, ack) without an LLM call.
+            mode = await rag.classify(body.query, history)
+
+            # Stream response — both generators yield SSE-formatted strings
             tokens: list[str] = []
             citations = []
             evidence_grade = ""
 
-            async for chunk in rag.stream_search(body.query, user.user_id):
-                # Skip the RAG-level done — main.py emits done with assistant_message_id
+            generator = (
+                rag.stream_chat(body.query, user.user_id, history)
+                if mode == "chat"
+                # Pass pre-computed embedding so stream_search skips its own embed call
+                else rag.stream_search(body.query, user.user_id, history, precomputed_embedding=embedding)
+            )
+
+            async for chunk in generator:
+                # Skip the inner done — main.py emits done with assistant_message_id
                 if chunk.startswith("event: done"):
                     continue
                 yield chunk
-                # Parse SSE chunks to capture citations for persistence
+                # Parse SSE to capture citations and tokens for persistence
                 if chunk.startswith("event: citations"):
                     data_line = chunk.split("\ndata: ", 1)[-1].strip()
                     try:
@@ -212,22 +318,23 @@ async def search_stream(
             # Persist assistant response and emit its ID so the client
             # can use it as parent_message_id for the next turn.
             answer = "".join(tokens)
+
+            # Filter citations to only those actually referenced inline in the answer.
+            # The citations event was sent upfront with all retrieved chunks; here we
+            # strip any that the LLM never cited so they don't appear in stored history
+            # or the Sources panel after renumbering.
+            import re as _re
+            cited_indices = {int(m) for m in _re.findall(r'\[(\d+)\]', answer)}
+            cited_citations = [c for c in citations if c.index in cited_indices]
+
             assistant_msg = await append_assistant_message(
                 conversation_id=conversation_id,
                 parent_id=user_message_id,
                 content=answer,
-                citations=citations,
+                citations=cited_citations,
                 evidence_grade=evidence_grade,
             )
             yield f"event: done\ndata: {_json.dumps({'assistant_message_id': assistant_msg['id']})}\n\n"
-
-            # Generate title on first exchange — emit via SSE so sidebar updates instantly
-            convo = await get_conversation(conversation_id, user.user_id)
-            if convo and not convo.get("title"):
-                title = await _generate_title(body.query)
-                if title:
-                    await update_title(conversation_id, user.user_id, title)
-                    yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
 
         except Exception as exc:
             import json as _json
@@ -248,13 +355,13 @@ async def search_stream(
 # ---------------------------------------------------------------------------
 
 
-async def _generate_title(first_query: str) -> str | None:
-    """Generate a short conversation title from the first user query. Returns None on failure."""
+async def _generate_title(first_query: str) -> str:
+    """Generate a short conversation title using Groq. Falls back to truncated query."""
     try:
         import litellm
 
         resp = await litellm.acompletion(
-            model=_settings.litellm_model,
+            model=_settings.classify_model,
             messages=[
                 {
                     "role": "user",
@@ -266,10 +373,15 @@ async def _generate_title(first_query: str) -> str | None:
                 }
             ],
             max_tokens=20,
-            api_key=_settings.nvidia_api_key,
-            api_base=_settings.nvidia_api_base,
+            api_key=_settings.groq_api_key,
         )
         title = resp.choices[0].message.content.strip().strip('"').strip("'")
-        return title or None
-    except Exception:
-        return None
+        if title:
+            return title
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Title generation failed: %s", exc)
+
+    # Fallback: first 6 words of the query
+    words = first_query.strip().split()
+    return " ".join(words[:6]) + ("…" if len(words) > 6 else "")

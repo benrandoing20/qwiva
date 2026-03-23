@@ -34,19 +34,14 @@ function renumberByAppearance(
     if (!order.includes(n)) order.push(n)
   }
 
-  // Build old → new index map
+  // Build old → new index map — only for citations actually referenced inline
   const remap: Record<number, number> = {}
   order.forEach((oldIdx, i) => { remap[oldIdx] = i + 1 })
-  // Any citations not cited in text get appended in original order
-  citations.forEach((c) => {
-    if (!(c.index in remap)) {
-      remap[c.index] = Object.keys(remap).length + 1
-    }
-  })
 
   const newAnswer = answer.replace(/\[(\d+)\]/g, (_, n) => `[${remap[parseInt(n)] ?? n}]`)
   const newCitations = citations
-    .map((c) => ({ ...c, index: remap[c.index] ?? c.index }))
+    .filter((c) => c.index in remap)
+    .map((c) => ({ ...c, index: remap[c.index] }))
     .sort((a, b) => a.index - b.index)
 
   return { answer: newAnswer, citations: newCitations }
@@ -97,6 +92,14 @@ export default function HomePage() {
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const lastAssistantIdRef = useRef<string | null>(null)
+  // Mirrors activeConversationId as a ref so async stream closures can read the
+  // current value without capturing a stale closure.
+  const activeConversationIdRef = useRef<string | null>(null)
+  // Background streams: conversations that finished loading while the user was elsewhere.
+  const [backgroundDone, setBackgroundDone] = useState<{ conversationId: string; title: string }[]>([])
+  // Generation counter: incremented on each new search so the previous stream's
+  // finally block doesn't clobber isLoading for a newly started stream.
+  const streamGenRef = useRef(0)
 
   // ------------------------------------------------------------------
   // Auth guard + initial conversation load
@@ -109,13 +112,18 @@ export default function HomePage() {
         if (!token) { router.push('/auth/login'); return }
         const convs = await fetchConversations(token)
         setConversations(convs)
-      } catch {
-        // non-fatal — sidebar just stays empty
+      } catch (err) {
+        console.error('Failed to load conversations:', err)
       } finally {
         setSidebarLoading(false)
       }
     })
   }, [router])
+
+  // Keep ref in sync so async closures can read the current conversation id
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId
+  }, [activeConversationId])
 
   // ------------------------------------------------------------------
   // Scroll: only when a NEW message is added — never during token streaming
@@ -148,7 +156,7 @@ export default function HomePage() {
   // ------------------------------------------------------------------
   const handleSelectConversation = useCallback(async (id: string) => {
     setActiveConversationId(id)
-    setMessages([])
+    // Don't clear messages immediately — keep old content visible while fetching
     setIsLoading(false)
     setConversationError(null)
     setIsLoadingConversation(true)
@@ -159,10 +167,14 @@ export default function HomePage() {
       const token = await getAccessToken()
       if (!token) { router.push('/auth/login'); return }
       const msgs = await fetchConversationMessages(id, token)
+      // Swap messages in a single update so there's no blank frame
       setMessages(msgs)
       const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
       lastAssistantIdRef.current = lastAssistant?.id ?? null
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 50)
+      // Scroll after paint so layout is stable
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load conversation'
       setConversationError(msg)
@@ -191,8 +203,8 @@ export default function HomePage() {
       if (!token) return
       const convs = await fetchConversations(token)
       setConversations(convs)
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.error('Failed to refresh conversations:', err)
     }
   }
 
@@ -210,8 +222,8 @@ export default function HomePage() {
         setMessages([])
         lastAssistantIdRef.current = null
       }
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.error('Failed to delete conversation:', err)
     }
   }
 
@@ -226,9 +238,13 @@ export default function HomePage() {
     const token = await getAccessToken()
     if (!token) { router.push('/auth/login'); return }
 
+    // Increment generation so this stream "owns" isLoading
+    streamGenRef.current += 1
+    const myGen = streamGenRef.current
+
     // Optimistic user message
     const tempUserId = `temp-${Date.now()}`
-    const userMsg: ChatMessage = { id: tempUserId, role: 'user', content: query }
+    const userMsg: ChatMessage = { id: tempUserId, stableKey: tempUserId, role: 'user', content: query }
     setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
 
@@ -236,6 +252,7 @@ export default function HomePage() {
     const tempAssistantId = `temp-assistant-${Date.now()}`
     const assistantMsg: ChatMessage = {
       id: tempAssistantId,
+      stableKey: tempAssistantId,
       role: 'assistant',
       content: '',
       isStreaming: true,
@@ -245,6 +262,23 @@ export default function HomePage() {
     // Track the real ids resolved from SSE
     let realConversationId: string | null = activeConversationId
     let realUserMessageId: string | null = null
+    let pendingSuggestions: string[] = []
+
+    // Token buffer — accumulate tokens and flush every animation frame (~16ms)
+    // instead of calling setMessages on every single token (30–50x/sec with fast models)
+    let tokenBuffer = ''
+    let rafId: number | null = null
+    const flushTokens = () => {
+      if (!tokenBuffer) return
+      const toFlush = tokenBuffer
+      tokenBuffer = ''
+      rafId = null
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempAssistantId ? { ...m, content: m.content + toFlush } : m,
+        ),
+      )
+    }
 
     try {
       for await (const event of streamSearch(
@@ -262,24 +296,8 @@ export default function HomePage() {
               m.id === tempUserId ? { ...m, id: realUserMessageId! } : m,
             ),
           )
-          // New conversation — insert into sidebar immediately with query as provisional title
-          // so the user sees it right away. The `title` SSE event will replace it with the
-          // LLM-generated title once it arrives.
-          if (!activeConversationId) {
-            const words = query.trim().split(/\s+/)
-            const provisionalTitle = words.slice(0, 6).join(' ') + (words.length > 6 ? '…' : '')
-            const now = new Date().toISOString()
-            setConversations((prev) => [
-              {
-                id: realConversationId!,
-                title: provisionalTitle,
-                title_generated: false,
-                created_at: now,
-                updated_at: now,
-              },
-              ...prev,
-            ])
-          }
+          // Don't add to sidebar yet — wait for the title SSE event so it appears
+          // with the real title already set (no empty → title flash).
         } else if (event.event === 'status') {
           setMessages((prev) =>
             prev.map((m) =>
@@ -301,35 +319,73 @@ export default function HomePage() {
             ),
           )
         } else if (event.event === 'token') {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempAssistantId
-                ? { ...m, content: m.content + event.data.token }
-                : m,
-            ),
-          )
+          tokenBuffer += event.data.token
+          if (!rafId) rafId = requestAnimationFrame(flushTokens)
+        } else if (event.event === 'suggestions') {
+          pendingSuggestions = event.data.suggestions
         } else if (event.event === 'done') {
+          // Cancel any pending rAF flush and fold buffered tokens directly into
+          // this update — single atomic render, no double-flash.
+          if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+          const pendingTokens = tokenBuffer
+          tokenBuffer = ''
           setMessages((prev) =>
             prev.map((m) => {
               if (m.id !== tempAssistantId) return m
+              const fullContent = m.content + pendingTokens
               const { answer, citations } = renumberByAppearance(
-                m.content,
+                fullContent,
                 m.citations ?? [],
               )
-              return { ...m, id: event.data.assistant_message_id, content: answer, citations, isStreaming: false }
+              return {
+                ...m,
+                id: event.data.assistant_message_id,
+                content: answer,
+                citations,
+                isStreaming: false,
+                suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
+              }
             }),
           )
           // Capture real DB id for use as parent_message_id on next turn
           lastAssistantIdRef.current = event.data.assistant_message_id
+
+          // If user navigated away during streaming, show a notification bubble
+          if (realConversationId && activeConversationIdRef.current !== realConversationId) {
+            setConversations((prev) => {
+              const conv = prev.find((c) => c.id === realConversationId)
+              setBackgroundDone((bd) => {
+                if (bd.some((b) => b.conversationId === realConversationId)) return bd
+                return [...bd, {
+                  conversationId: realConversationId!,
+                  title: conv?.title ?? 'Your search',
+                }]
+              })
+              return prev
+            })
+          }
         } else if (event.event === 'title') {
-          // Title arrived — update sidebar in place without a full refresh
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === event.data.conversation_id
-                ? { ...c, title: event.data.title }
-                : c,
-            ),
-          )
+          setConversations((prev) => {
+            const exists = prev.some((c) => c.id === event.data.conversation_id)
+            if (exists) {
+              // Existing conversation — update title in place
+              return prev.map((c) =>
+                c.id === event.data.conversation_id ? { ...c, title: event.data.title } : c,
+              )
+            }
+            // New conversation — add to sidebar now that we have the real title
+            const now = new Date().toISOString()
+            return [
+              {
+                id: event.data.conversation_id,
+                title: event.data.title,
+                title_generated: true,
+                created_at: now,
+                updated_at: now,
+              },
+              ...prev,
+            ]
+          })
         } else if (event.event === 'error') {
           setMessages((prev) =>
             prev.map((m) =>
@@ -350,7 +406,8 @@ export default function HomePage() {
         ),
       )
     } finally {
-      setIsLoading(false)
+      // Only clear isLoading if this is still the current stream
+      if (streamGenRef.current === myGen) setIsLoading(false)
     }
   }
 
@@ -375,13 +432,8 @@ export default function HomePage() {
         {/* Main chat area */}
         <main className="flex flex-col flex-1 overflow-hidden">
           {/* Message thread (scrollable) */}
-          <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
-            {isLoadingConversation ? (
-              /* Loading conversation history */
-              <div className="flex items-center justify-center h-full">
-                <ThinkingIndicator message="Loading conversation…" />
-              </div>
-            ) : conversationError ? (
+          <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 overflow-y-auto relative">
+            {conversationError ? (
               /* Failed to load */
               <div className="flex flex-col items-center justify-center h-full gap-4">
                 <p className="text-sm text-red-400">{conversationError}</p>
@@ -416,11 +468,28 @@ export default function HomePage() {
               </div>
             ) : (
               /* Conversation thread */
-              <div className="max-w-3xl mx-auto w-full px-4 py-8 space-y-6">
+              <div
+                className="max-w-3xl mx-auto w-full px-4 py-8 space-y-6 transition-opacity duration-200"
+                style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
+              >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.id} message={msg} />
+                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSearch} />
                 ))}
                 <div ref={bottomRef} />
+              </div>
+            )}
+
+            {/* Fade overlay while switching conversations — sits on top of dimmed messages */}
+            {isLoadingConversation && messages.length > 0 && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <ThinkingIndicator message="Loading conversation…" />
+              </div>
+            )}
+
+            {/* Full-screen loader only for the first load (no previous messages to show) */}
+            {isLoadingConversation && messages.length === 0 && (
+              <div className="flex items-center justify-center h-full">
+                <ThinkingIndicator message="Loading conversation…" />
               </div>
             )}
           </div>
@@ -439,6 +508,59 @@ export default function HomePage() {
           </div>
         </main>
       </div>
+
+      {/* Background stream notifications */}
+      {backgroundDone.length > 0 && (
+        <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-2">
+          {backgroundDone.map((item) => (
+            <BackgroundDoneToast
+              key={item.conversationId}
+              item={item}
+              onNavigate={(id) => {
+                handleSelectConversation(id)
+                setBackgroundDone((prev) => prev.filter((b) => b.conversationId !== id))
+              }}
+              onDismiss={(id) => setBackgroundDone((prev) => prev.filter((b) => b.conversationId !== id))}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Background stream notification bubble
+// ---------------------------------------------------------------------------
+function BackgroundDoneToast({
+  item,
+  onNavigate,
+  onDismiss,
+}: {
+  item: { conversationId: string; title: string }
+  onNavigate: (id: string) => void
+  onDismiss: (id: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-2.5 bg-[#1a1a1a] border border-teal-500/30 rounded-xl px-3.5 py-2.5 shadow-xl max-w-xs">
+      <div className="w-2 h-2 rounded-full bg-teal-500 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] text-[#6b6b6b] mb-0.5">Answer ready</p>
+        <p className="text-xs text-[#e8e8e8] truncate">{item.title}</p>
+      </div>
+      <button
+        onClick={() => onNavigate(item.conversationId)}
+        className="text-xs text-teal-400 hover:text-teal-300 transition-colors flex-shrink-0"
+      >
+        View →
+      </button>
+      <button
+        onClick={() => onDismiss(item.conversationId)}
+        className="text-[#4a4a4a] hover:text-[#9a9a9a] transition-colors flex-shrink-0 ml-0.5"
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
     </div>
   )
 }
@@ -446,10 +568,10 @@ export default function HomePage() {
 // ---------------------------------------------------------------------------
 // Individual message row
 // ---------------------------------------------------------------------------
-function MessageRow({ message }: { message: ChatMessage }) {
+function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: (q: string) => void }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className={`flex justify-end${message.stableKey ? ' animate-fadeIn' : ''}`}>
         <div className="max-w-[80%] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 text-sm text-[#e8e8e8] leading-relaxed whitespace-pre-wrap">
           {message.content}
         </div>
@@ -460,28 +582,24 @@ function MessageRow({ message }: { message: ChatMessage }) {
   // Assistant message
   if (message.isError) {
     return (
-      <div className="w-full">
+      <div className={`w-full${message.stableKey ? ' animate-fadeIn' : ''}`}>
         <p className="text-sm text-red-400 py-2">{message.content}</p>
       </div>
     )
   }
 
-  // Show animated indicator while waiting for first token
-  if (message.isStreaming && !message.content) {
-    return (
-      <div className="w-full">
-        <ThinkingIndicator message={message.statusMessage ?? 'Searching guidelines…'} />
-      </div>
-    )
-  }
-
+  // Always render AnswerCard — it handles the empty/thinking state internally.
+  // This avoids a DOM swap when the first token arrives, which causes layout jitter.
   return (
-    <div className="w-full">
+    <div className={`w-full${message.stableKey ? ' animate-fadeIn' : ''}`}>
       <AnswerCard
         answer={message.content}
         citations={message.citations ?? []}
         isStreaming={message.isStreaming ?? false}
         isDone={!message.isStreaming}
+        statusMessage={message.statusMessage}
+        suggestions={message.suggestions}
+        onSuggest={onSuggest}
       />
     </div>
   )

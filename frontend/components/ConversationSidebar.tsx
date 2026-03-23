@@ -82,12 +82,13 @@ export default function ConversationSidebar({
             {conversations.map((conv) => {
               const isActive = conv.id === activeId
               return (
-                <li key={conv.id} className="group relative">
+                <li key={conv.id} className="group relative animate-fadeIn">
                   <button
-                    onClick={() => onSelect(conv.id)}
+                    onClick={() => !isActive && onSelect(conv.id)}
+                    disabled={isActive}
                     className={`w-full text-left px-3 py-2.5 pr-8 rounded-xl transition-colors ${
                       isActive
-                        ? 'bg-[#1e1e1e] text-[#e8e8e8]'
+                        ? 'bg-[#1e1e1e] text-[#e8e8e8] cursor-default'
                         : 'text-[#9a9a9a] hover:bg-[#171717] hover:text-[#e8e8e8]'
                     }`}
                   >

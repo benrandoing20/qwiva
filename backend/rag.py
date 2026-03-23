@@ -5,7 +5,7 @@ Pipeline (per query):
   1. Embed query        → text-embedding-3-small via NVIDIA hub
   2. Hybrid retrieval   → Qdrant vector search + Supabase FTS, Python RRF merge
   3. Rerank             → NVIDIA llama-3.2-nv-rerankqa-1b-v2, top 12 → top 5
-  4. Generate           → bedrock-claude-sonnet-4-6 via LiteLLM
+  4. Generate           → anthropic/claude-sonnet-4-6 via LiteLLM (prompt-cached)
   5. Stream             → SSE: status → citations → token → done
 """
 
@@ -49,24 +49,57 @@ def _configure_langfuse(settings: Settings) -> None:
 
 _SYSTEM_PROMPT = """\
 You are Qwiva, a clinical decision-support assistant for physicians in Kenya. \
+Your role is to surface what clinical guidelines recommend — not to instruct. \
+The physician makes the clinical decision. \
 Your answers are grounded exclusively in the clinical guidelines provided below.
 
 Clinical precision: Address the physician directly. Use appropriate medical \
 terminology. Be concise — a busy clinician should get the answer in the first \
-two sentences.
+two sentences. Always name the source guideline in the first two sentences. \
+State the evidence grade (Class I, IIa, IIb / Level A, B, C) if explicitly \
+present in the retrieved guidelines. Do not infer or assume a grade \
+not in the source.
 
-Honesty: If the provided guidelines do not address the question, say so clearly. \
-Do not extrapolate beyond the sources.
+Honesty: If the provided guidelines do not address the question, say so clearly \
+and flag which part cannot be answered from available sources. Do not extrapolate \
+beyond the sources. Never state a drug dose not explicitly present in the \
+retrieved guidelines — if absent, say so and direct the physician to the \
+appropriate formulary.
+
+Refer vs manage: For every management query include — even if not asked — \
+(1) what to do now with specific doses where available, \
+(2) when and to whom to refer with exact criteria, \
+(3) what to do if referral is not immediately available.
+
+Ambiguous queries: If the query lacks a presenting complaint, age, or clinical \
+setting, ask one clarifying question before answering. While asking, always \
+provide the universal immediate action bridge: \
+"While you clarify — if the patient is acutely unwell right now, follow ABCDE: \
+secure Airway, support Breathing, restore Circulation, assess Disability \
+(GCS and pupils), Expose and examine fully. Call for help immediately." \
+Do not generate specific clinical output until context is provided.
 
 Formatting rules — follow exactly:
-- Use markdown: bold for drug names and key terms, bullet points for lists of \
-  drugs, criteria, or steps.
-- Citations: place a citation [1] at the end of a sentence or paragraph that it \
-  covers. One citation can represent an entire section — do not repeat it on every \
-  sentence. Cite only when introducing new information from a source.
-- Lead with the direct answer, then supporting detail.
-- End with a one-line note if Kenya-specific context or resource limitations are \
-  relevant.
+- Lead with named guideline + evidence grade (if available) + direct answer \
+  in 1-2 sentences. Frame recommendations as: "Per [guideline], [recommendation]" \
+  or "[Guideline] recommends..." — not "Start / Give / Use" as standalone \
+  instructions without attribution.
+- Use **bold** for section headers, drug names, diagnoses, and critical values.
+- Use standard markdown only: numbered lists (1. 2. 3.) for ordered steps where \
+  sequence matters, bullet points ( - ) for criteria and conditions, tables for \
+  drug comparisons and dose thresholds, and a blockquote (>) for one critical \
+  safety point per section — state it directly as a fact without the word Warning \
+  or any prefix label. Use blockquotes sparingly. \
+  Do not use special symbols such as ☐ → ✓ ⚠️.
+- DOSING: present as a markdown table whenever doses appear in the retrieved \
+  guidelines: | Drug | Starting Dose | Route | Frequency | Notes |
+- Citations: place [1] at the end of the sentence or paragraph it supports. \
+  Only cite sources used inline in the response — do not list retrieved sources \
+  not referenced in the text.
+- End every response with a 🇰🇪 Kenya context note: name specific drugs on the \
+  KEML, flag what is unavailable, state the guideline-supported alternative, \
+  and note what to do if the recommended treatment or referral pathway is \
+  not accessible.
 """
 
 _USER_TEMPLATE = """\
@@ -75,8 +108,32 @@ Clinical question: {question}
 Relevant guideline excerpts:
 {sources}
 
-Answer using only the excerpts above. Place citations [1], [2], etc. at the end \
-of the sentence or paragraph they support — not after every clause.
+Answer using only the excerpts above. Place citations sparingly: one [n] at the \
+end of a paragraph or bullet group it supports — not after each individual sentence \
+or bullet.
+"""
+
+_CHAT_SYSTEM_PROMPT = """\
+You are Qwiva, a clinical decision-support assistant for physicians in Kenya.
+Be concise and professional. Address the physician directly.
+
+You are responding to a conversational message or a follow-up that can be \
+answered from the conversation so far. Respond naturally and briefly.
+
+Vague presentations: If the physician states a patient's condition without a \
+specific clinical question (e.g. "my patient is unwell", "my patient has a fever"), \
+ask ONE targeted clarifying question to understand what guideline information they \
+need — e.g. "What specific aspect would you like guidance on — diagnosis, treatment, \
+dosing, or referral criteria?"
+
+Citation handling: if the user asks about a source from a previous response, \
+describe it exactly as listed in the "Referenced sources" section of that response. \
+Do not speculate about whether a citation was correctly attributed — sources were \
+retrieved from verified guideline documents by the system. Trust them as given.
+
+For clinical questions needing specific guideline information (dosing, protocols, \
+treatment algorithms), give a brief answer if you can, and suggest they ask it \
+as a dedicated clinical question to get a fully cited guideline-grounded response.
 """
 
 
@@ -94,6 +151,7 @@ class Chunk:
     year: str
     publisher: str
     chunk_index: int
+    source_url: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -204,20 +262,25 @@ class QwivaRAG:
         )
 
     async def stream_search(
-        self, query: str, user_id: str
+        self,
+        query: str,
+        user_id: str,
+        history: list[dict] | None = None,
+        precomputed_embedding: list[float] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Streaming search. Yields raw SSE-formatted strings.
 
         Event order:
-          1. event: status     (progress updates during retrieval)
-          2. event: citations  (sources ready — emitted before generation starts)
-          3. event: token      (one per token as the LLM streams)
+          1. event: status       (progress updates during retrieval)
+          2. event: citations    (sources ready — before generation starts)
+          3. event: token        (one per token as the LLM streams)
           4. event: done
+          5. event: suggestions  (3 follow-up question chips)
         """
-        # --- embed first (needed for cache lookup and retrieval) ---
         yield _sse("status", {"message": "Searching guidelines…"})
-        embedding = await self._embed(query)
+        # Accept pre-computed embedding from main.py (saves one embed round-trip).
+        embedding = precomputed_embedding or await self._embed(query)
 
         # --- semantic cache check ---
         cached = self._cache.lookup(embedding)
@@ -226,7 +289,7 @@ class QwivaRAG:
                 citations=cached.citations,
                 evidence_grade=cached.evidence_grade,
             ).model_dump())
-            yield _sse("status", {"message": "Generating answer…"})
+            yield _sse("status", {"message": "Generating response…"})
             # Stream cached answer in small chunks to preserve typewriter UX
             step = 8
             for i in range(0, len(cached.answer), step):
@@ -245,11 +308,13 @@ class QwivaRAG:
         citations_payload = CitationsPayload(citations=citations, evidence_grade=evidence_grade)
         yield _sse("citations", citations_payload.model_dump())
 
-        yield _sse("status", {"message": "Generating answer…"})
+        yield _sse("status", {"message": "Generating response…"})
         answer_parts: list[str] = []
-        async for token in self._generate_stream(query, chunks, user_id=user_id):
+        async for token in self._generate_stream(query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
+
+        full_answer = "".join(answer_parts)
 
         # Store in cache for future identical/similar queries
         self._cache.store(
@@ -257,10 +322,15 @@ class QwivaRAG:
             chunks=chunks,
             citations=citations,
             evidence_grade=evidence_grade,
-            answer="".join(answer_parts),
+            answer=full_answer,
         )
 
         yield _sse("done", {})
+
+        # Follow-up suggestions — arrive after done so the answer is already shown
+        suggestions = await self._generate_suggestions(query, full_answer, history)
+        if suggestions:
+            yield _sse("suggestions", {"suggestions": suggestions})
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -334,7 +404,8 @@ class QwivaRAG:
         )
         response.raise_for_status()
         results = response.json()["results"]
-        return [chunks[r["index"]] for r in results]
+        # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
+        return [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
         embedding = await self._embed(query)
@@ -353,7 +424,11 @@ class QwivaRAG:
     # ------------------------------------------------------------------
 
     async def _generate_stream(
-        self, query: str, chunks: list[Chunk], user_id: str = ""
+        self,
+        query: str,
+        chunks: list[Chunk],
+        user_id: str = "",
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         # Assign the same deduplicated indices used in citations
         seen: dict[str, int] = {}
@@ -370,8 +445,13 @@ class QwivaRAG:
             f"[{n}] {c.guideline_title} — {c.cascading_path}\n{c.content}"
             for n, c in numbered
         )
+        history_messages = _trim_history(history or [])
+        # cache_control marks the system prompt for Anthropic prompt caching.
+        # On non-Anthropic routes LiteLLM strips the key — no side effects.
+        system_content = [{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
+            *history_messages,
             {
                 "role": "user",
                 "content": _USER_TEMPLATE.format(
@@ -380,12 +460,6 @@ class QwivaRAG:
                 ),
             },
         ]
-
-        extra: dict = {}
-        if self._settings.nvidia_api_key:
-            extra["api_key"] = self._settings.nvidia_api_key
-        if self._settings.nvidia_api_base:
-            extra["api_base"] = self._settings.nvidia_api_base
 
         response = await litellm.acompletion(
             model=self._settings.litellm_model,
@@ -397,7 +471,7 @@ class QwivaRAG:
                 "trace_user_id": user_id,
                 "trace_metadata": {"query": query, "num_sources": len(chunks)},
             },
-            **extra,
+            **self._extra_kwargs,
         )
 
         async for chunk in response:
@@ -406,12 +480,175 @@ class QwivaRAG:
                 yield token
 
     # ------------------------------------------------------------------
+    # Routing: classify a user message
+    # ------------------------------------------------------------------
+
+    async def classify(self, query: str, history: list[dict]) -> str:
+        """Return 'rag' if guideline lookup is needed, 'chat' for conversational reply."""
+        # Fast path: obvious cases resolved without an LLM call
+        quick = _quick_classify(query)
+        if quick:
+            return quick
+
+        history_snippet = ""
+        if history:
+            last_few = history[-6:]
+            history_snippet = "\n".join(
+                f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
+            )
+
+        prompt = (
+            "Classify this message for a clinical assistant.\n"
+            "Reply with ONLY one word: rag OR chat\n\n"
+            "rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
+            "chat = greeting, thanks, small talk, follow-up question about the previous answer, "
+            "or any question answerable from the conversation history above\n\n"
+            "Vague patient presentations without a specific clinical question "
+            "(e.g. \"my patient is unwell\", \"I have a patient with fever\") → chat, "
+            "so the assistant can ask what specific information is needed.\n\n"
+            "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
+            "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
+            "IMPORTANT: If the previous assistant turn already retrieved guideline sources AND the "
+            "current message asks for clarification, elaboration, or a follow-up on those sources, "
+            "classify as chat — do NOT trigger another RAG lookup.\n\n"
+            + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
+            + f"Message: {query}"
+        )
+        try:
+            resp = await litellm.acompletion(
+                model=self._settings.classify_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=5,
+                temperature=0,
+                **self._classify_kwargs,
+            )
+            result = resp.choices[0].message.content.strip().lower()
+            return "rag" if "rag" in result else "chat"
+        except Exception:
+            return "rag"  # safe default for a clinical app
+
+    # ------------------------------------------------------------------
+    # Follow-up suggestions
+    # ------------------------------------------------------------------
+
+    async def _generate_suggestions(
+        self, query: str, answer: str, history: list[dict] | None = None
+    ) -> list[str]:
+        """
+        Return up to 3 follow-up questions only when they would genuinely help.
+
+        The model decides — it returns null when the answer is already complete
+        or the query is conversational/social (no follow-ups needed).
+        History is included so suggestions are relevant to the full conversation.
+        """
+        history_snippet = ""
+        if history:
+            last_few = history[-4:]
+            history_snippet = "\n".join(
+                f"{m['role'].upper()}: {m['content'][:300]}" for m in last_few
+            )
+
+        prompt = (
+            "A physician just received this clinical answer. Generate follow-up questions "
+            "they would realistically ask next — specific to the drugs, doses, conditions, "
+            "or complications mentioned. Each question must be a natural next clinical step "
+            "(e.g. monitoring, side effects of a named drug, alternative if first-line fails, "
+            "paediatric vs adult dosing, specific complication management).\n\n"
+            "Rules:\n"
+            "- Each question must be ≤12 words and directly reference content from the answer\n"
+            "- Do NOT generate generic questions like 'What are the side effects?' — "
+            "name the specific drug or condition\n"
+            "- Return ONLY a JSON array of exactly 3 questions, or null if the answer was "
+            "conversational/social and follow-ups would add no clinical value\n\n"
+            + (f"Conversation context:\n{history_snippet}\n\n" if history_snippet else "")
+            + f"Question: {query[:300]}\n"
+            f"Answer: {answer[:800]}"
+        )
+        try:
+            resp = await litellm.acompletion(
+                model=self._settings.classify_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=150,
+                temperature=0.2,
+                **self._classify_kwargs,
+            )
+            raw = resp.choices[0].message.content.strip()
+            if not raw or raw.lower() == "null":
+                return []
+            suggestions = json.loads(raw)
+            if isinstance(suggestions, list) and suggestions:
+                return [str(s) for s in suggestions[:3]]
+        except Exception:
+            pass
+        return []
+
+    # ------------------------------------------------------------------
+    # Direct chat (no retrieval)
+    # ------------------------------------------------------------------
+
+    async def stream_chat(
+        self, query: str, user_id: str, history: list[dict] | None = None
+    ) -> AsyncGenerator[str, None]:
+        """Stream a direct response from conversation context — no RAG."""
+        yield _sse("status", {"message": "Generating response…"})
+        yield _sse("citations", CitationsPayload(citations=[], evidence_grade="").model_dump())
+
+        history_messages = _trim_history(history or [])
+        chat_system_content = [{"type": "text", "text": _CHAT_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+        messages = [
+            {"role": "system", "content": chat_system_content},
+            *history_messages,
+            {"role": "user", "content": query},
+        ]
+
+        response = await litellm.acompletion(
+            model=self._settings.litellm_model,
+            messages=messages,
+            stream=True,
+            metadata={
+                "trace_name": "qwiva_chat",
+                "tags": ["chat"],
+                "trace_user_id": user_id,
+            },
+            **self._extra_kwargs,
+        )
+        chat_tokens: list[str] = []
+        async for chunk in response:
+            token = chunk.choices[0].delta.content
+            if token:
+                chat_tokens.append(token)
+                yield _sse("token", {"token": token})
+        yield _sse("done", {})
+
+        suggestions = await self._generate_suggestions(query, "".join(chat_tokens), history)
+        if suggestions:
+            yield _sse("suggestions", {"suggestions": suggestions})
+
+    # ------------------------------------------------------------------
     # Lazy clients (constructed once, reused across requests)
     # ------------------------------------------------------------------
 
     @cached_property
+    def _extra_kwargs(self) -> dict:
+        """LiteLLM kwargs for the main generation model (Anthropic direct)."""
+        extra: dict = {}
+        if self._settings.anthropic_api_key:
+            extra["api_key"] = self._settings.anthropic_api_key
+        return extra
+
+    @cached_property
+    def _classify_kwargs(self) -> dict:
+        """LiteLLM kwargs for classify + suggestions (Groq)."""
+        extra: dict = {}
+        if self._settings.groq_api_key:
+            extra["api_key"] = self._settings.groq_api_key
+        return extra
+
+    @cached_property
     def _openai(self) -> AsyncOpenAI:
-        """Embeddings client — routed through the NVIDIA inference hub."""
+        """Embeddings client — uses OpenAI direct if openai_api_key is set, otherwise NVIDIA hub."""
+        if self._settings.openai_api_key:
+            return AsyncOpenAI(api_key=self._settings.openai_api_key)
         return AsyncOpenAI(
             api_key=self._settings.nvidia_api_key,
             base_url=self._settings.nvidia_api_base,
@@ -420,7 +657,7 @@ class QwivaRAG:
     @cached_property
     def _http(self) -> httpx.AsyncClient:
         """Persistent HTTP client for reranker — avoids per-request TCP handshake."""
-        return httpx.AsyncClient(timeout=90)
+        return httpx.AsyncClient(timeout=90, http2=True)
 
     @cached_property
     def _qdrant(self) -> AsyncQdrantClient:
@@ -443,6 +680,63 @@ rag = QwivaRAG()
 # ---------------------------------------------------------------------------
 
 
+_CHAT_STARTERS = {
+    "thank", "thanks", "ok", "okay", "great", "perfect", "got it",
+    "hi", "hello", "hey", "bye", "goodbye", "yes", "no", "sure",
+    "understood", "noted", "alright", "sounds good",
+}
+
+# Phrases that clearly reference prior conversation content — always route to chat
+_FOLLOWUP_STARTERS = {
+    "can you elaborate", "tell me more", "what about", "explain that",
+    "clarify", "what did source", "from the guidelines", "as you mentioned",
+    "earlier you said", "based on what you", "more detail", "expand on",
+    "could you expand", "can you explain", "what does source", "what does that mean",
+}
+
+def _quick_classify(query: str) -> str | None:
+    """
+    Heuristic pre-filter — avoids an LLM call for obvious cases.
+    Returns 'chat' if clearly conversational/follow-up, None if ambiguous (use LLM).
+    """
+    stripped = query.strip().lower().rstrip("!.,")
+    # Single word or very short phrases that are clearly social
+    if stripped in _CHAT_STARTERS:
+        return "chat"
+    # Short messages whose first word is a social starter and have no clinical terms
+    words = stripped.split()
+    if len(words) <= 4 and words[0] in _CHAT_STARTERS:
+        clinical_hints = {"dose", "mg", "treatment", "?", "how", "what", "when", "why", "which"}
+        if not any(h in stripped for h in clinical_hints):
+            return "chat"
+    # Queries that clearly reference prior context — no new retrieval needed
+    if any(stripped.startswith(p) for p in _FOLLOWUP_STARTERS):
+        return "chat"
+    return None  # ambiguous — let the LLM decide
+
+
+def _trim_history(
+    history: list[dict],
+    max_turns: int | None = None,
+    max_chars: int = 32_000,
+) -> list[dict]:
+    """Return as many recent messages as fit within the character budget.
+
+    max_turns is intentionally unlimited by default — the full conversation is
+    passed so the LLM retains context from early turns.  max_chars acts as a
+    safety valve against extreme conversation lengths.
+    """
+    pool = history[-max_turns:] if max_turns else history
+    total = 0
+    trimmed: list[dict] = []
+    for msg in reversed(pool):
+        total += len(msg.get("content", ""))
+        if total > max_chars:
+            break
+        trimmed.insert(0, msg)
+    return trimmed
+
+
 def _row_to_chunk(row: dict) -> Chunk:
     meta = row.get("metadata") or {}
     return Chunk(
@@ -453,8 +747,12 @@ def _row_to_chunk(row: dict) -> Chunk:
         year=str(meta.get("year", "")),
         publisher=meta.get("publisher", ""),
         chunk_index=int(meta.get("chunk_index", 0)),
+        source_url=meta.get("source_url", "") or meta.get("url", ""),
     )
 
+
+
+_EXCERPT_CHARS = 400  # chars of chunk content stored per citation for follow-up grounding
 
 
 def _build_citations(chunks: list[Chunk]) -> list[Citation]:
@@ -463,6 +761,8 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
     Multiple chunks from the same guideline collapse into one citation entry.
     The LLM prompt is also built with these deduplicated numbers, so [1][2]
     in the answer text always matches what the UI displays.
+    The leading excerpt of the first (highest-ranked) chunk is stored so
+    follow-up questions can reference what was actually retrieved.
     """
     seen: dict[str, int] = {}  # guideline_title -> assigned index
     citations: list[Citation] = []
@@ -478,6 +778,9 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
                 section=chunk.cascading_path,
                 year=chunk.year,
                 publisher=chunk.publisher,
+                excerpt=chunk.content[:_EXCERPT_CHARS],
+                source_url=chunk.source_url,
+                source_content=chunk.content,
             ))
             idx += 1
 
@@ -532,4 +835,5 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         year=str(p.get("year", "")),
         publisher=p.get("publisher", ""),
         chunk_index=int(p.get("chunk_index", 0)),
+        source_url=p.get("source_url", "") or p.get("url", ""),
     )

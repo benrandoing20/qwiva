@@ -6,6 +6,8 @@ from evals.pipeline import PipelineResult
 
 @dataclass
 class LatencyReport:
+    classify_p50: float
+    classify_p95: float
     embed_p50: float
     embed_p95: float
     retrieval_p50: float
@@ -30,6 +32,8 @@ def compute_latency(results: list[PipelineResult]) -> LatencyReport:
         )
 
     return LatencyReport(
+        classify_p50=p([r.classify_ms for r in ok], 50),
+        classify_p95=p([r.classify_ms for r in ok], 95),
         embed_p50=p([r.embed_ms for r in ok], 50),
         embed_p95=p([r.embed_ms for r in ok], 95),
         retrieval_p50=p([r.retrieval_ms for r in ok], 50),
