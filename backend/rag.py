@@ -557,22 +557,26 @@ class QwivaRAG:
                 f"{m['role'].upper()}: {m['content'][:500]}" for m in last_few
             )
 
-        # Citation titles give the LLM named anchors (guideline + drug/condition)
+        # Citation passages give the LLM the actual retrieved text to anchor suggestions
         citation_lines = ""
         if citations:
-            citation_lines = "\n".join(
-                f"[{c.index}] {c.guideline_title}"
-                + (f" ({c.publisher}, {c.year})" if getattr(c, "publisher", None) else "")
-                for c in citations
-            )
+            parts = []
+            for c in citations:
+                header = f"[{c.index}] {c.guideline_title}"
+                if getattr(c, "publisher", None):
+                    header += f" ({c.publisher}, {c.year})"
+                body = getattr(c, "source_content", "") or getattr(c, "excerpt", "")
+                if body:
+                    # 500 chars per source keeps prompt tight but includes key clinical values
+                    header += f"\n    {body[:500]}"
+                parts.append(header)
+            citation_lines = "\n\n".join(parts)
 
         prompt = (
             "A physician just received the clinical answer below. Generate 3 follow-up "
-            "questions they would realistically ask next, grounded in the specific drugs, "
-            "doses, conditions, complications, or guidelines named in the answer.\n\n"
+            "questions they would realistically ask next, grounded in the specific information in the answer.\n\n"
             "Rules:\n"
             "- Each question ≤12 words and must name a specific entity from the answer "
-            "(e.g. a drug name, a dose, a guideline, a named complication)\n"
             "- Natural next clinical steps: monitoring parameters, side effects of the "
             "named drug, alternative if first-line fails, paediatric vs adult dosing, "
             "or specific complication management\n"
