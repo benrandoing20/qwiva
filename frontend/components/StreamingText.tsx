@@ -56,6 +56,11 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-4">
+              <table className="min-w-full">{children}</table>
+            </div>
+          ),
           // @ts-expect-error — custom HTML element
           cite: ({ 'data-n': n }: { 'data-n': string }) => {
             const firstIdx = parseInt(n.split('-')[0])
