@@ -9,6 +9,8 @@ interface Props {
   onNew: () => void
   onDelete: (id: string) => void
   isLoading: boolean
+  isOpen: boolean
+  onClose: () => void
 }
 
 function relativeTime(dateStr: string): string {
@@ -39,9 +41,20 @@ export default function ConversationSidebar({
   onNew,
   onDelete,
   isLoading,
+  isOpen,
+  onClose,
 }: Props) {
   return (
-    <aside className="hidden md:flex flex-col w-[260px] flex-shrink-0 border-r border-[#1e1e1e] bg-[#0f0f0f] h-full overflow-hidden">
+    <>
+      {/* Mobile backdrop — tap outside to close */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={onClose}
+        />
+      )}
+
+      <aside className={`flex flex-col w-[260px] flex-shrink-0 border-r border-[#1e1e1e] bg-[#0f0f0f] overflow-hidden fixed top-14 bottom-0 left-0 z-40 transition-transform duration-300 ease-in-out md:static md:top-auto md:bottom-auto md:z-auto md:h-full md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       {/* New conversation button */}
       <div className="p-3 border-b border-[#1e1e1e]">
         <button
@@ -132,5 +145,6 @@ export default function ConversationSidebar({
         )}
       </div>
     </aside>
+    </>
   )
 }

@@ -283,7 +283,10 @@ class QwivaRAG:
         embedding = precomputed_embedding or await self._embed(query)
 
         # --- semantic cache check ---
-        cached = self._cache.lookup(embedding)
+        # Skip cache when conversation history is present: a follow-up question
+        # may embed similarly to a prior standalone query, but the answer must
+        # reflect the current conversation context rather than a cached response.
+        cached = self._cache.lookup(embedding) if not history else None
         if cached:
             yield _sse("citations", CitationsPayload(
                 citations=cached.citations,
@@ -328,7 +331,7 @@ class QwivaRAG:
         yield _sse("done", {})
 
         # Follow-up suggestions — arrive after done so the answer is already shown
-        suggestions = await self._generate_suggestions(query, full_answer, history)
+        suggestions = await self._generate_suggestions(query, full_answer, history, citations)
         if suggestions:
             yield _sse("suggestions", {"suggestions": suggestions})
 
@@ -532,44 +535,67 @@ class QwivaRAG:
     # ------------------------------------------------------------------
 
     async def _generate_suggestions(
-        self, query: str, answer: str, history: list[dict] | None = None
+        self,
+        query: str,
+        answer: str,
+        history: list[dict] | None = None,
+        citations: list | None = None,
     ) -> list[str]:
         """
         Return up to 3 follow-up questions only when they would genuinely help.
 
         The model decides — it returns null when the answer is already complete
         or the query is conversational/social (no follow-ups needed).
-        History is included so suggestions are relevant to the full conversation.
+        History and citation titles are included so suggestions are grounded in
+        the specific drugs, guidelines, and conditions discussed.
         """
+        # Recent conversation context (roles + truncated content)
         history_snippet = ""
         if history:
             last_few = history[-4:]
             history_snippet = "\n".join(
-                f"{m['role'].upper()}: {m['content'][:300]}" for m in last_few
+                f"{m['role'].upper()}: {m['content'][:500]}" for m in last_few
             )
 
+        # Citation passages give the LLM the actual retrieved text to anchor suggestions
+        citation_lines = ""
+        if citations:
+            parts = []
+            for c in citations:
+                header = f"[{c.index}] {c.guideline_title}"
+                if getattr(c, "publisher", None):
+                    header += f" ({c.publisher}, {c.year})"
+                body = getattr(c, "source_content", "") or getattr(c, "excerpt", "")
+                if body:
+                    # 500 chars per source keeps prompt tight but includes key clinical values
+                    header += f"\n    {body[:500]}"
+                parts.append(header)
+            citation_lines = "\n\n".join(parts)
+
         prompt = (
-            "A physician just received this clinical answer. Generate follow-up questions "
-            "they would realistically ask next — specific to the drugs, doses, conditions, "
-            "or complications mentioned. Each question must be a natural next clinical step "
-            "(e.g. monitoring, side effects of a named drug, alternative if first-line fails, "
-            "paediatric vs adult dosing, specific complication management).\n\n"
+            "A physician just received the clinical answer below. Generate 3 follow-up "
+            "questions they would realistically ask next, grounded in the specific information in the answer.\n\n"
             "Rules:\n"
-            "- Each question must be ≤12 words and directly reference content from the answer\n"
-            "- Do NOT generate generic questions like 'What are the side effects?' — "
-            "name the specific drug or condition\n"
-            "- Return ONLY a JSON array of exactly 3 questions, or null if the answer was "
-            "conversational/social and follow-ups would add no clinical value\n\n"
-            + (f"Conversation context:\n{history_snippet}\n\n" if history_snippet else "")
-            + f"Question: {query[:300]}\n"
-            f"Answer: {answer[:800]}"
+            "- Each question ≤12 words and must name a specific entity from the answer "
+            "- Natural next clinical steps: monitoring parameters, side effects of the "
+            "named drug, alternative if first-line fails, paediatric vs adult dosing, "
+            "or specific complication management\n"
+            "- Do NOT generate generic questions — 'What are the side effects?' is wrong; "
+            "'What are the side effects of amoxicillin?' is correct\n"
+            "- Do not repeat a question already answered in the conversation\n"
+            "- Return ONLY a JSON array of exactly 3 strings, or the word null if the "
+            "answer was conversational/social and no clinical follow-up adds value\n\n"
+            + (f"Conversation so far:\n{history_snippet}\n\n" if history_snippet else "")
+            + (f"Guidelines cited:\n{citation_lines}\n\n" if citation_lines else "")
+            + f"Physician question: {query[:400]}\n"
+            f"Clinical answer: {answer[:1500]}"
         )
         try:
             resp = await litellm.acompletion(
                 model=self._settings.classify_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=150,
-                temperature=0.2,
+                max_tokens=200,
+                temperature=0.3,
                 **self._classify_kwargs,
             )
             raw = resp.choices[0].message.content.strip()

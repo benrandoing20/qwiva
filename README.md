@@ -151,10 +151,22 @@ uvicorn backend.main:app --reload
 cd frontend
 npm install
 
-# Create frontend/.env.local with NEXT_PUBLIC_* vars (see below)
+# Copy the frontend env vars from the root .env into frontend/.env.local
+# (Next.js requires NEXT_PUBLIC_* vars in this file — it will not read the root .env)
+cp ../.env.example frontend/.env.local   # then fill in your values, or:
+
+cat > frontend/.env.local << 'EOF'
+NEXT_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
+NEXT_PUBLIC_API_URL=http://localhost:8000
+EOF
+
 npm run dev
 # → http://localhost:3000
 ```
+
+> **Common mistake:** skipping `frontend/.env.local` causes a Supabase client crash on startup
+> (`Your project's URL and API key are required`). The root `.env` is only read by the backend.
 
 ### Database
 
