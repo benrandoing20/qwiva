@@ -97,6 +97,7 @@ export default function HomePage() {
   const activeConversationIdRef = useRef<string | null>(null)
   // Background streams: conversations that finished loading while the user was elsewhere.
   const [backgroundDone, setBackgroundDone] = useState<{ conversationId: string; title: string }[]>([])
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   // Generation counter: incremented on each new search so the previous stream's
   // finally block doesn't clobber isLoading for a newly started stream.
   const streamGenRef = useRef(0)
@@ -155,6 +156,7 @@ export default function HomePage() {
   // Load a past conversation
   // ------------------------------------------------------------------
   const handleSelectConversation = useCallback(async (id: string) => {
+    setSidebarOpen(false)
     setActiveConversationId(id)
     // Don't clear messages immediately — keep old content visible while fetching
     setIsLoading(false)
@@ -416,7 +418,7 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col h-screen bg-[#0f0f0f]">
-      <Navbar />
+      <Navbar onToggleSidebar={() => setSidebarOpen(v => !v)} />
 
       {/* Below navbar: sidebar + chat area */}
       <div className="flex flex-1 overflow-hidden pt-14">
@@ -427,6 +429,8 @@ export default function HomePage() {
           onNew={handleNew}
           onDelete={handleDelete}
           isLoading={sidebarLoading}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
         />
 
         {/* Main chat area */}
