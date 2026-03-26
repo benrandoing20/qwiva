@@ -93,6 +93,7 @@ async def run_question(question: str) -> PipelineResult:
             retrieval_ms=retrieval_ms,
             rerank_ms=rerank_ms,
             ttft_ms=ttft_ms,
+            total_generation_ms=total_generation_ms,
             total_ms=(time.perf_counter() - t_start) * 1000,
             error=traceback.format_exc(),
         )

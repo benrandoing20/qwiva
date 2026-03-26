@@ -79,7 +79,7 @@ async def run_ragas(
     )
     embeddings = LangchainEmbeddingsWrapper(
         OpenAIEmbeddings(
-            model="azure/openai/text-embedding-3-small",
+            model="text-embedding-3-small",
             openai_api_key=config.judge_api_key,
             openai_api_base=base_url,
         )
