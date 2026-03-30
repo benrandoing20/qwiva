@@ -1,122 +1,1720 @@
 [
   {
-    "id": "q01",
-    "question": "What is the first-line treatment for uncomplicated malaria in adults in Kenya?",
-    "ground_truth": "The first-line treatment for uncomplicated malaria in adults in Kenya is Artemether-Lumefantrine (AL), given as a fixed-dose combination over three days (six doses). Each dose is taken twice daily with food or a fatty drink to improve absorption. This regimen is recommended in the Kenya National Guidelines for the Management of Malaria.",
-    "expected_source_keywords": ["malaria", "Kenya"],
-    "tags": ["malaria", "treatment", "adult", "first-line"],
+    "id": "q16",
+    "question": "What is the injectable dose of lenacapavir for HIV prevention?",
+    "ground_truth": "927 mg (2 x 1.5 mL injections) administered subcutaneously.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 1
   },
   {
-    "id": "q02",
-    "question": "What is the correct IV artesunate dosing for severe malaria in adults?",
-    "ground_truth": "For severe malaria in adults, IV artesunate is given at 2.4 mg/kg body weight at 0, 12, and 24 hours, then once daily thereafter until the patient can tolerate oral therapy. Treatment should be continued for a minimum of 24 hours before switching to a full course of an effective oral antimalarial. Artesunate is preferred over quinine for severe malaria due to its superior efficacy and safety profile.",
-    "expected_source_keywords": ["malaria", "severe"],
-    "tags": ["malaria", "severe", "artesunate", "IV", "adult"],
-    "difficulty": 2
-  },
-  {
-    "id": "q03",
-    "question": "How should postpartum haemorrhage be initially managed?",
-    "ground_truth": "Initial management of postpartum haemorrhage (PPH) includes immediate uterine massage to stimulate contraction, administration of oxytocin 10 IU IM or IV as the first-line uterotonic, and assessment of the cause using the four T's (Tone, Trauma, Tissue, Thrombin). Intravenous access should be established with two large-bore cannulas, and crystalloid fluid resuscitation commenced. If oxytocin fails, second-line uterotonics such as misoprostol or ergometrine should be used.",
-    "expected_source_keywords": ["postpartum", "haemorrhage", "obstetric"],
-    "tags": ["obstetrics", "PPH", "haemorrhage", "emergency"],
-    "difficulty": 2
-  },
-  {
-    "id": "q04",
-    "question": "What antiretroviral regimen is recommended for HIV-positive pregnant women in Kenya?",
-    "ground_truth": "HIV-positive pregnant women in Kenya should receive a tenofovir-based triple ARV regimen for life (Option B+), regardless of CD4 count or clinical stage. The preferred first-line regimen is Tenofovir Disoproxil Fumarate (TDF) + Lamivudine (3TC) + Efavirenz (EFV) as a once-daily fixed-dose combination. This regimen also prevents mother-to-child transmission and is continued postpartum.",
-    "expected_source_keywords": ["ARV", "HIV", "PMTCT", "pregnancy"],
-    "tags": ["HIV", "pregnancy", "ARV", "PMTCT", "Option B+"],
-    "difficulty": 2
-  },
-  {
-    "id": "q05",
-    "question": "What are the criteria for diagnosing severe acute malnutrition in children under 5?",
-    "ground_truth": "Severe acute malnutrition (SAM) in children under 5 is diagnosed by any one of the following: weight-for-height Z-score less than -3 (below -3SD), mid-upper arm circumference (MUAC) less than 115 mm in children 6-59 months, or the presence of bilateral pitting oedema. SAM requires urgent therapeutic feeding and treatment of complications. Children with medical complications should be admitted to an inpatient therapeutic feeding centre.",
-    "expected_source_keywords": ["malnutrition", "nutrition", "SAM"],
-    "tags": ["nutrition", "SAM", "paediatric", "under-5"],
+    "id": "q17",
+    "question": "What oral loading dose is required when starting lenacapavir PrEP?",
+    "ground_truth": "600 mg (2 x 300 mg tablets) over two consecutive days, beginning on the day of the first injection. Total oral loading dose is 1200 mg.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 1
   },
   {
-    "id": "q06",
-    "question": "What is the standard treatment regimen for new pulmonary tuberculosis in adults?",
-    "ground_truth": "New pulmonary tuberculosis in adults is treated with the standard short-course regimen: 2 months of Isoniazid (H), Rifampicin (R), Pyrazinamide (Z), and Ethambutol (E) in the intensive phase (2HRZE), followed by 4 months of Isoniazid and Rifampicin in the continuation phase (4HR). All doses are given daily and supervised under directly observed therapy (DOT). Pyridoxine (vitamin B6) is co-administered with isoniazid to prevent peripheral neuropathy.",
-    "expected_source_keywords": ["tuberculosis", "TB"],
-    "tags": ["TB", "tuberculosis", "treatment", "adult"],
+    "id": "q18",
+    "question": "How frequently are follow-up injections of lenacapavir administered?",
+    "ground_truth": "Every 26 weeks (approximately every 6 months).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 1
   },
   {
-    "id": "q07",
-    "question": "What is the immediate management of eclampsia?",
-    "ground_truth": "Immediate management of eclampsia includes securing the airway, placing the patient in the left lateral position, and administering magnesium sulphate as first-line anticonvulsant therapy (4 g IV loading dose over 20 minutes, followed by 1 g/hour IV maintenance). Antihypertensive therapy should be initiated if systolic BP is 160 mmHg or greater, using hydralazine or labetalol. Delivery should be expedited after maternal stabilisation, regardless of gestational age.",
-    "expected_source_keywords": ["eclampsia", "obstetric", "hypertension", "pregnancy"],
-    "tags": ["eclampsia", "obstetrics", "emergency", "seizure", "pregnancy"],
+    "id": "q19",
+    "question": "What is the acceptable window for lenacapavir follow-up injections?",
+    "ground_truth": "From two weeks before to two weeks after the next scheduled appointment (26 weeks +/- two weeks).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q20",
+    "question": "Is an oral reloading dose required for follow-up lenacapavir injections if the person returns on time?",
+    "ground_truth": "No. Oral reloading is not needed for follow-up injections provided users return on time (within 26 weeks +/- two weeks of the previous injection).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q21",
+    "question": "What should happen if a person on lenacapavir returns after 28 weeks for their follow-up injection?",
+    "ground_truth": "They will need to receive the same oral reloading dose (2 x 300 mg tablets over two consecutive days) before the injection.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q22",
+    "question": "Does lenacapavir require dose adjustment in patients with renal impairment?",
+    "ground_truth": "No dose adjustment is required in individuals with mild, moderate or severe renal impairment (creatinine clearance >= 15 mL/min). Lenacapavir has not been studied in end-stage renal disease and should be used with caution in these individuals.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q23",
+    "question": "Does lenacapavir require dose adjustment during pregnancy?",
+    "ground_truth": "No. Pharmacokinetic data suggest that no dose adjustment for lenacapavir is needed during pregnancy.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q24",
+    "question": "What is the route of administration for lenacapavir PrEP?",
+    "ground_truth": "Subcutaneous injection.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q25",
+    "question": "How long may lenacapavir remain in the body after the last injection?",
+    "ground_truth": "At least 12 months after the last injection (pharmacokinetic tail). However, after six months concentrations fall below the protective threshold.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "dosing",
+      "PrEP"
+    ],
+    "tags": [
+      "dosing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q26",
+    "question": "What was the efficacy of lenacapavir compared to background HIV incidence in PURPOSE 1?",
+    "ground_truth": "100% efficacy (RR: 0.00; 95% CI: 0.00-0.04).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q27",
+    "question": "What was the efficacy of lenacapavir compared to background HIV incidence in PURPOSE 2?",
+    "ground_truth": "96% efficacy (RR: 0.04; 95% CI: 0.01-0.18).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q28",
+    "question": "How did lenacapavir compare to daily oral TDF/FTC in PURPOSE 1?",
+    "ground_truth": "Lenacapavir showed 100% efficacy compared to daily oral TDF/FTC (RR: 0.00; 95% CI: 0.00-0.10). No infections occurred in the lenacapavir group compared to 16 in the TDF/FTC group (1.69 per 100 person-years).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q29",
+    "question": "How did lenacapavir compare to daily oral TDF/FTC in PURPOSE 2?",
+    "ground_truth": "Lenacapavir showed 89% efficacy compared to TDF/FTC (RR: 0.11; 95% CI: 0.02-0.51). Two infections occurred in the lenacapavir group (0.10 per 100 person-years) versus nine in the TDF/FTC group (0.93 per 100 person-years).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q30",
+    "question": "What was the HIV incidence rate in the TDF/FTC group in PURPOSE 1?",
+    "ground_truth": "1.69 per 100 person-years (95% CI: 0.96-2.74), with 16 incident infections.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q31",
+    "question": "What was the overall certainty of evidence for lenacapavir's reduction in HIV acquisition?",
+    "ground_truth": "High certainty of evidence.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q32",
+    "question": "How many individuals were randomised to lenacapavir across PURPOSE 1 and PURPOSE 2?",
+    "ground_truth": "4,333 individuals were randomised to receive active lenacapavir out of 8,660 total randomised.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q33",
+    "question": "What was the on-time injection adherence rate for lenacapavir at week 52 across both PURPOSE trials?",
+    "ground_truth": "92.8% of participants receiving lenacapavir had received injections on time at week 52.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q34",
+    "question": "What were the study populations in PURPOSE 1?",
+    "ground_truth": "Cisgender adolescent girls and young women ages 16-25 years in South Africa and Uganda.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q35",
+    "question": "What were the study populations in PURPOSE 2?",
+    "ground_truth": "Cisgender gay, bisexual and other men who have sex with men; transgender women; transgender men and gender non-binary persons, aged at least 16 years, in Argentina, Brazil, Mexico, Peru, South Africa, Thailand and the United States.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q36",
+    "question": "What was the rate of any adverse event in the lenacapavir arm of PURPOSE 1?",
+    "ground_truth": "76.3% of participants in the lenacapavir arm reported at least one adverse event (RR: 0.98; 95% CI: 0.94-1.02).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q37",
+    "question": "What was the rate of grade 3 or 4 adverse events in the lenacapavir arm of PURPOSE 1?",
+    "ground_truth": "4.1% of participants receiving lenacapavir experienced grade 3 or 4 adverse events compared to 4.7% in the TDF/FTC arm (RR: 0.88; 95% CI: 0.63-1.24).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q38",
+    "question": "How common were injection site reactions in PURPOSE 1 for the lenacapavir group?",
+    "ground_truth": "68.8% of participants randomised to lenacapavir experienced injection site reactions, compared to 33.9% in the TDF/FTC arm (RR: 2.03; 95% CI: 1.86-2.21).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q39",
+    "question": "How common were injection site reactions in PURPOSE 2 for the lenacapavir group?",
+    "ground_truth": "83.2% of participants in the lenacapavir arm reported injection site reactions, compared to 69.5% in the TDF/FTC arm (RR: 1.20; 95% CI: 1.15-1.25).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q40",
+    "question": "What happened to injection site reaction frequency over time in the PURPOSE trials?",
+    "ground_truth": "The frequency and severity of injection site reactions decreased over time.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q41",
+    "question": "Has lenacapavir been associated with nephrotoxicity or hepatotoxicity?",
+    "ground_truth": "No. The use of lenacapavir has not been associated with nephrotoxicity or hepatotoxicity. No liver or kidney function testing and monitoring are required during lenacapavir initiation or follow-up.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q42",
+    "question": "What is the certainty of evidence for lenacapavir's safety profile regarding overall adverse events?",
+    "ground_truth": "High certainty of evidence that there is little to no difference in overall adverse event rates between lenacapavir and oral TDF/FTC.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q43",
+    "question": "What STI incidence was observed in the PURPOSE 1 lenacapavir arm?",
+    "ground_truth": "48.7 events per 100 person-years (gonorrhoea, chlamydia and trichomonas) in the lenacapavir arm versus 48.4 in the TDF/FTC arm (RR: 1.01; 95% CI: 0.90-1.13).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q44",
+    "question": "What is the certainty of evidence for lenacapavir's effect on STI incidence?",
+    "ground_truth": "Moderate certainty of evidence that lenacapavir probably results in little to no difference in STI incidence compared with oral TDF/FTC.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q45",
+    "question": "What adverse pregnancy outcomes were observed in PURPOSE 1 for the lenacapavir group?",
+    "ground_truth": "Rates of grade 3 or higher pregnancy-related complications were 1.1% in the lenacapavir arm versus 1.5% in the TDF/FTC arm (RR: 0.75; 95% CI: 0.40-1.41). Rates of birth outcomes did not differ significantly. One minor congenital anomaly (polydactyly) was observed.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "safety",
+      "adverse"
+    ],
+    "tags": [
+      "safety",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q46",
+    "question": "What drug resistance mutation was found in participants who acquired HIV in the lenacapavir arm of PURPOSE 2?",
+    "ground_truth": "Both participants who acquired HIV in the lenacapavir arm of PURPOSE 2 had the N74D mutation, associated with resistance to HIV-1 capsid inhibitors.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "resistance",
+      "capsid"
+    ],
+    "tags": [
+      "resistance",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 3
   },
   {
-    "id": "q08",
-    "question": "What is the recommended gentamicin dosing for neonatal sepsis?",
-    "ground_truth": "For neonatal sepsis, gentamicin is dosed at 5 mg/kg IV or IM once daily for neonates up to 7 days old, and 7.5 mg/kg once daily for neonates 8 days and older. Gentamicin is used in combination with ampicillin as first-line treatment for neonatal sepsis. Renal function should be monitored, and trough levels checked if treatment extends beyond 5 days. Duration of treatment is typically 7-10 days for uncomplicated sepsis.",
-    "expected_source_keywords": ["neonatal", "sepsis", "newborn"],
-    "tags": ["neonatal", "sepsis", "gentamicin", "antibiotic", "paediatric"],
-    "difficulty": 2
-  },
-  {
-    "id": "q09",
-    "question": "At what blood pressure threshold should antihypertensive treatment be initiated in pregnancy?",
-    "ground_truth": "Antihypertensive treatment should be initiated in pregnancy when systolic blood pressure is 150 mmHg or greater, or diastolic blood pressure is 100 mmHg or greater (severe hypertension). For women with chronic hypertension in pregnancy, treatment is recommended when blood pressure reaches 140/90 mmHg or higher. Methyldopa is the preferred oral antihypertensive in pregnancy; nifedipine and labetalol are acceptable alternatives. ACE inhibitors and ARBs are contraindicated in pregnancy.",
-    "expected_source_keywords": ["hypertension", "pregnancy", "obstetric"],
-    "tags": ["hypertension", "pregnancy", "antihypertensive", "obstetrics"],
-    "difficulty": 2
-  },
-  {
-    "id": "q10",
-    "question": "How is oral rehydration solution (ORS) prepared at home, and what is its composition?",
-    "ground_truth": "Standard WHO low-osmolarity ORS contains 2.6 g sodium chloride, 2.9 g trisodium citrate, 1.5 g potassium chloride, and 13.5 g glucose per litre of clean water, providing an osmolarity of 245 mOsm/L. For home-prepared solution when sachets are unavailable, one level teaspoon of salt and eight level teaspoons of sugar are dissolved in one litre of clean water. ORS should be given in small, frequent sips and continued until diarrhoea stops and normal hydration is restored.",
-    "expected_source_keywords": ["diarrhoea", "ORS", "rehydration"],
-    "tags": ["diarrhoea", "ORS", "rehydration", "paediatric", "dehydration"],
-    "difficulty": 1
-  },
-  {
-    "id": "q11",
-    "question": "What is the recommended antibiotic for community-acquired pneumonia in adults?",
-    "ground_truth": "For community-acquired pneumonia (CAP) in adults not requiring ICU admission, amoxicillin is the first-line antibiotic for outpatient or ward treatment of non-severe pneumonia in Kenya. For patients with moderate-to-severe CAP requiring hospitalisation, benzylpenicillin IV plus doxycycline covers typical and atypical organisms. Azithromycin is an alternative for penicillin-allergic patients. Duration of treatment is typically 5-7 days for non-severe and 7-10 days for severe CAP.",
-    "expected_source_keywords": ["pneumonia", "respiratory", "antibiotic"],
-    "tags": ["pneumonia", "CAP", "antibiotic", "adult", "respiratory"],
-    "difficulty": 2
-  },
-  {
-    "id": "q12",
-    "question": "When should insulin be initiated in a patient with type 2 diabetes in Kenya?",
-    "ground_truth": "Insulin should be initiated in type 2 diabetes when HbA1c remains above 9% (or fasting blood glucose above 15 mmol/L) despite maximal oral therapy, when oral agents are contraindicated (e.g., renal failure, hepatic impairment), during acute illness, perioperative periods, or pregnancy. Basal insulin (intermediate NPH insulin or long-acting insulin analogue) is the preferred starting regimen. Initial dose is typically 0.1-0.2 units/kg/day at bedtime, titrated by 2 units every 3 days targeting a fasting glucose of 4-7 mmol/L.",
-    "expected_source_keywords": ["diabetes", "insulin"],
-    "tags": ["diabetes", "T2DM", "insulin", "endocrine"],
-    "difficulty": 2
-  },
-  {
-    "id": "q13",
-    "question": "How should status epilepticus be managed in an adult?",
-    "ground_truth": "Status epilepticus in adults should be managed in a stepwise manner: secure airway and give oxygen, establish IV access, and give lorazepam 4 mg IV (or diazepam 10 mg IV if lorazepam unavailable) as first-line benzodiazepine within 5 minutes. If seizures persist after 10 minutes, give phenytoin 18 mg/kg IV at a rate no faster than 50 mg/min, or phenobarbitone 15 mg/kg IV. Refractory status epilepticus requires ICU admission with anaesthetic agents. Check blood glucose immediately and treat hypoglycaemia.",
-    "expected_source_keywords": ["epilepsy", "seizure", "neurology"],
-    "tags": ["status epilepticus", "seizure", "neurology", "emergency", "adult"],
+    "id": "q47",
+    "question": "How many breakthrough infections occurred in the lenacapavir arm of PURPOSE 2 and what were their characteristics?",
+    "ground_truth": "Two breakthrough infections occurred. Both participants had lenacapavir levels consistent with the expected pharmacokinetic range. Infections occurred after the first injection but before the second, at weeks 13 and 26.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "resistance",
+      "capsid"
+    ],
+    "tags": [
+      "resistance",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 3
   },
   {
-    "id": "q14",
-    "question": "When and how should ARV prophylaxis be initiated in an HIV-exposed infant for PMTCT?",
-    "ground_truth": "HIV-exposed infants should receive nevirapine (NVP) prophylaxis starting within 6-12 hours of birth, regardless of the mother's ARV status. For infants at high risk of HIV acquisition (mothers who received less than 4 weeks of ART, or are identified late in pregnancy), dual prophylaxis with nevirapine plus zidovudine (AZT) is recommended for 6 weeks. Standard-risk infants receive nevirapine alone for 6 weeks. All HIV-exposed infants should be tested by HIV DNA PCR at 6 weeks.",
-    "expected_source_keywords": ["PMTCT", "HIV", "infant", "ARV"],
-    "tags": ["PMTCT", "HIV", "nevirapine", "infant", "neonatal"],
+    "id": "q48",
+    "question": "What is the current public health significance of lenacapavir resistance?",
+    "ground_truth": "Given the overall high efficacy and rarity of breakthrough infections, resistance is unlikely to have significant public health impact at present. Lenacapavir is first-in-class; no other antiretrovirals of this class are routinely used for prevention or treatment. The N74D mutation reduces susceptibility by approximately 20-fold.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "resistance",
+      "capsid"
+    ],
+    "tags": [
+      "resistance",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q49",
+    "question": "What is the risk of lenacapavir resistance during the pharmacokinetic tail period after discontinuation?",
+    "ground_truth": "After discontinuation, residual lenacapavir concentrations remain detectable for prolonged periods. If HIV acquisition occurs during the tail period, there is a risk of developing resistance to capsid inhibitors since drug levels are below the protective threshold but still detectable.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "resistance",
+      "capsid"
+    ],
+    "tags": [
+      "resistance",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q50",
+    "question": "What does the WHO guideline recommend regarding surveillance of lenacapavir drug resistance?",
+    "ground_truth": "Programmes implementing lenacapavir should build in surveillance of drug resistance among people with a history of lenacapavir use who are diagnosed with HIV. In well-resourced settings, population-level assessments of capsid inhibitor resistance in newly diagnosed individuals may also be beneficial.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "resistance",
+      "capsid"
+    ],
+    "tags": [
+      "resistance",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q51",
+    "question": "What is the WHO recommendation on lenacapavir for HIV prevention?",
+    "ground_truth": "Long-acting injectable lenacapavir should be offered as an additional prevention choice for people at risk of HIV, as part of combination prevention approaches. (Strong recommendation, moderate to high certainty of evidence).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "recommendation"
+    ],
+    "tags": [
+      "recommendation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q52",
+    "question": "What is the WHO recommendation on using rapid diagnostic tests for long-acting injectable PrEP?",
+    "ground_truth": "Rapid diagnostic tests may be used for HIV testing for initiation, continuation and discontinuation of long-acting PrEP. (Strong recommendation, very low certainty of evidence).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "recommendation"
+    ],
+    "tags": [
+      "recommendation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q53",
+    "question": "What is the WHO recommendation on HIV self-testing for long-acting injectable PrEP?",
+    "ground_truth": "The GDG concluded there was insufficient evidence to recommend HIV self-testing for long-acting injectable PrEP. HIVST continues to be recommended for oral PrEP, the dapivirine vaginal ring and PEP.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "recommendation"
+    ],
+    "tags": [
+      "recommendation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q54",
+    "question": "What is the strength of the WHO recommendation for lenacapavir as HIV prevention?",
+    "ground_truth": "Strong recommendation.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "recommendation"
+    ],
+    "tags": [
+      "recommendation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q55",
+    "question": "What methodology was used to grade the evidence and formulate lenacapavir recommendations?",
+    "ground_truth": "The GRADE (Grading of Recommendations Assessment, Development and Evaluation) methodology.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "recommendation"
+    ],
+    "tags": [
+      "recommendation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q56",
+    "question": "What is the interaction between lenacapavir and rifampicin?",
+    "ground_truth": "Potential interaction requiring dose adjustment. Rifampicin is a strong CYP3A4 inducer and can substantially reduce lenacapavir concentrations, resulting in potential loss of prevention efficacy.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q57",
+    "question": "What is the drug interaction between lenacapavir and hormonal contraceptives?",
+    "ground_truth": "No dose adjustment required. Lenacapavir is a moderate CYP3A4 inhibitor and could increase exposure of contraceptive hormones, but not to an extent requiring dose adjustment.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q58",
+    "question": "What is the interaction between lenacapavir and gender-affirming hormones?",
+    "ground_truth": "No dose adjustment required. Lenacapavir could potentially increase exposure of gender-affirming hormones, but not to an extent requiring dose adjustment.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q59",
+    "question": "What is the interaction between lenacapavir and sildenafil?",
+    "ground_truth": "Potential interaction that may persist after lenacapavir discontinuation. Sildenafil, tadalafil and vardenafil concentrations may increase due to CYP3A4 inhibition by lenacapavir.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q60",
+    "question": "What is the mechanism of lenacapavir's drug-drug interactions?",
+    "ground_truth": "Lenacapavir undergoes minimal metabolism. It is a moderate inhibitor of CYP3A4 affecting drugs metabolised by this enzyme. Drugs that are moderate or strong inducers of CYP3A4 (like rifampicin) can substantially reduce lenacapavir concentrations.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q61",
+    "question": "How long after lenacapavir discontinuation can drug interactions persist?",
+    "ground_truth": "Residual concentrations may remain in circulation for prolonged periods and could affect CYP3A4 substrates, particularly those initiated within nine months after the last subcutaneous dose.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q62",
+    "question": "What is the interaction between lenacapavir and carbamazepine?",
+    "ground_truth": "Potential interaction requiring dose adjustment. Carbamazepine, phenobarbital and phenytoin are CYP3A4 inducers and can substantially reduce lenacapavir concentrations, potentially resulting in loss of prevention efficacy.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q63",
+    "question": "Does lenacapavir interact with ketamine?",
+    "ground_truth": "Yes. Potential interaction that may persist after lenacapavir discontinuation. Ketamine concentrations may increase due to CYP3A4 inhibition by lenacapavir, potentially increasing side effects such as respiratory depression and hallucinations.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "drug interaction",
+      "CYP3A4"
+    ],
+    "tags": [
+      "drug_interactions",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q64",
+    "question": "How many pregnancies were confirmed in the lenacapavir arm of PURPOSE 1?",
+    "ground_truth": "193 pregnancies confirmed among 184 women assigned to lenacapavir, with 105 pregnancies having outcomes reported to date.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "pregnancy"
+    ],
+    "tags": [
+      "pregnancy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 2
   },
   {
-    "id": "q15",
-    "question": "What are the criteria for blood transfusion in a patient with anaemia?",
-    "ground_truth": "Blood transfusion in anaemia is indicated when haemoglobin is below 7 g/dL in a clinically stable patient, or when haemoglobin is 7-10 g/dL with evidence of haemodynamic compromise, symptomatic anaemia (dyspnoea at rest, angina), or ongoing blood loss. In children with severe malaria, transfusion is indicated at haemoglobin below 5 g/dL or haematocrit below 15%. Packed red cells are preferred over whole blood; a typical adult dose is 2-3 units with reassessment after each unit. Transfusion should be avoided in compensated chronic anaemia unless symptomatic.",
-    "expected_source_keywords": ["transfusion", "anaemia", "blood"],
-    "tags": ["transfusion", "anaemia", "haemoglobin", "adult", "paediatric"],
+    "id": "q65",
+    "question": "What is the WHO guidance on lenacapavir use during pregnancy?",
+    "ground_truth": "Available data suggest lenacapavir is probably safe during pregnancy with little to no effect on adverse pregnancy and birth outcomes compared to oral TDF/FTC (moderate certainty of evidence). No dose adjustment is needed. Robust surveillance systems should be in place to monitor outcomes.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "pregnancy"
+    ],
+    "tags": [
+      "pregnancy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
     "difficulty": 2
+  },
+  {
+    "id": "q66",
+    "question": "Should lenacapavir be discontinued when a person becomes pregnant?",
+    "ground_truth": "Based on available safety data, PrEP need not be discontinued during pregnancy for HIV-negative women with a high likelihood of HIV exposure. The choice should be made by the individual following discussion of risks and benefits with a healthcare provider.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "pregnancy"
+    ],
+    "tags": [
+      "pregnancy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q67",
+    "question": "What HIV testing is required before initiating long-acting injectable PrEP?",
+    "ground_truth": "HIV testing is required before initiating injectable LA-PrEP. Only individuals with an HIV-negative test result should be started on PrEP.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q68",
+    "question": "What should happen if a person has an inconclusive HIV test result before initiating LA-PrEP?",
+    "ground_truth": "They should be referred for further testing in 14 days to rule in or rule out seroconversion. Any individual with persistent inconclusive results after 14 days should be considered HIV-negative and started on PrEP.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q69",
+    "question": "Should NAT be required for initiating or continuing injectable long-acting PrEP?",
+    "ground_truth": "No. NAT and laboratory-based HIV testing should not be required nor prioritised for PrEP delivery, including injectable LA-PrEP.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q70",
+    "question": "Why are RDTs preferred over NAT for injectable LA-PrEP programmes?",
+    "ground_truth": "RDTs provide faster turnaround times, cause fewer delayed or missed injection visits, are significantly less expensive (US$0.17-4.00 vs US$8.80-85.10 for NAT), require less infrastructure, and show no meaningful difference in detecting breakthrough infections or preventing drug resistance.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q71",
+    "question": "What should be done if a person on lenacapavir has a reactive HIV test result?",
+    "ground_truth": "Further testing according to the national algorithm to confirm diagnosis. Upon confirmation, ART should be initiated promptly to minimise drug resistance risk. Drug resistance testing should be done if available.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q72",
+    "question": "Should NAT be used to resolve inconclusive HIV test results in people taking injectable LA-PrEP?",
+    "ground_truth": "No. NAT should not be used because, among those taking injectable LA-PrEP, HIV may not be adequately detected and there could be a greater likelihood of false positives.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q73",
+    "question": "Are antibody/antigen RDTs preferred over antibody-only RDTs for injectable LA-PrEP?",
+    "ground_truth": "No. There is no evidence supporting the prioritisation of antigen/antibody RDTs over antibody-only RDTs. Antibody/antigen RDTs had a pooled sensitivity during acute HIV infection of only 50% among PrEP users.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q74",
+    "question": "What PrEP products does WHO currently recommend alongside lenacapavir?",
+    "ground_truth": "Oral TDF-based PrEP, long-acting injectable cabotegravir (CAB-LA), and the dapivirine vaginal ring (DVR).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q75",
+    "question": "What hepatitis testing does the WHO guideline recommend for people starting lenacapavir?",
+    "ground_truth": "Testing for HBV and/or HCV should be offered and repeated annually for those who test negative. HBV vaccination should be offered to HBV-negative individuals.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q76",
+    "question": "What does the WHO guideline recommend regarding STI testing for lenacapavir users?",
+    "ground_truth": "Testing for gonorrhoea, chlamydia, syphilis and trichomoniasis should be offered. However, lack of STI testing should not limit or delay access to lenacapavir.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q77",
+    "question": "What differentiated service delivery models does WHO recommend for lenacapavir?",
+    "ground_truth": "Task sharing with nurses, pharmacists, community health workers and peers; community settings such as pharmacies, mobile sites and community-based organisations; virtual interventions and telehealth; integration with antenatal and postnatal services.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q78",
+    "question": "What should happen to people who discontinue lenacapavir regarding HIV prevention?",
+    "ground_truth": "Providers should support transition to other HIV prevention approaches to protect against HIV acquisition during the pharmacokinetic tail period (up to 12 months), since concentrations fall below the protective threshold after 6 months.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q79",
+    "question": "What are the five key populations defined by WHO in the lenacapavir guideline?",
+    "ground_truth": "Men who have sex with men, people who use injectable drugs, people in prisons and other closed settings, sex workers, and trans and gender-diverse people.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "populations",
+      "HIV"
+    ],
+    "tags": [
+      "populations",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q80",
+    "question": "Is lenacapavir safe in adolescents?",
+    "ground_truth": "Yes. Sub-analyses from PURPOSE 1 found no differences in lenacapavir safety and efficacy in adolescents ages 16 and 17 compared with participants who were 18 years or older, suggesting no need for dose adjustments.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "populations",
+      "HIV"
+    ],
+    "tags": [
+      "populations",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q81",
+    "question": "What evidence exists for lenacapavir in people who inject drugs?",
+    "ground_truth": "No studies were identified on lenacapavir for prevention in people who inject drugs. A randomised clinical trial (PURPOSE 4) is underway, with results expected mid-2027.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "populations",
+      "HIV"
+    ],
+    "tags": [
+      "populations",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q82",
+    "question": "At what annual per-person cost threshold could lenacapavir be cost-effective in South Africa?",
+    "ground_truth": "Up to US$213 PPPY when scaled up among key populations; up to US$225 PPPY to be as cost-effective as oral PrEP. One study estimated a maximum of US$106 PPPY with risk-prioritised coverage of 5%.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "cost",
+      "modelling"
+    ],
+    "tags": [
+      "cost_effectiveness",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q83",
+    "question": "What cost threshold benchmark was used in lenacapavir modelling studies?",
+    "ground_truth": "Less than US$500 per disability-adjusted life-year (DALY) averted.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "cost",
+      "modelling"
+    ],
+    "tags": [
+      "cost_effectiveness",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q84",
+    "question": "How does lenacapavir's dosing schedule address equity concerns?",
+    "ground_truth": "The six-monthly dosing schedule may reduce cost and time barriers from frequent clinic visits, benefiting individuals with caregiving and employment responsibilities. It eases integration into other preventive services including contraception, antenatal and postnatal care.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "equity",
+      "access"
+    ],
+    "tags": [
+      "equity",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q85",
+    "question": "What equity concern is raised regarding lenacapavir's provider-administered nature?",
+    "ground_truth": "Centralised service delivery could inadvertently re-medicalise prevention and limit access for those in remote areas or facing transportation and financial constraints, unless paired with decentralised or community-based delivery.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "equity",
+      "access"
+    ],
+    "tags": [
+      "equity",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q86",
+    "question": "What type of trials were PURPOSE 1 and PURPOSE 2?",
+    "ground_truth": "Multi-centred, double-blind, randomised, active-controlled trials assessing the efficacy of lenacapavir compared with a background HIV incidence cohort and with daily oral TDF/FTC.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "trial"
+    ],
+    "tags": [
+      "trial_design",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q87",
+    "question": "In how many countries were the PURPOSE trials conducted?",
+    "ground_truth": "PURPOSE 1 in two countries (South Africa and Uganda); PURPOSE 2 in seven countries (Argentina, Brazil, Mexico, Peru, South Africa, Thailand and the United States).",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "trial"
+    ],
+    "tags": [
+      "trial_design",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q88",
+    "question": "Over how many months were participants provided lenacapavir in the PURPOSE trials?",
+    "ground_truth": "A median of 12 months under clinical trial conditions.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "trial"
+    ],
+    "tags": [
+      "trial_design",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q89",
+    "question": "When did the WHO GDG meeting take place to develop lenacapavir recommendations?",
+    "ground_truth": "A virtual GDG meeting occurred over three days from 28 to 30 January 2025.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "guideline"
+    ],
+    "tags": [
+      "guideline_development",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q90",
+    "question": "Who funded the development of the WHO lenacapavir guideline?",
+    "ground_truth": "The Gates Foundation and UNITAID.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "guideline"
+    ],
+    "tags": [
+      "guideline_development",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q91",
+    "question": "What was the primary audience intended for the WHO lenacapavir guidelines?",
+    "ground_truth": "National and subnational programme managers and policy-makers responsible for the national health sector response to HIV, particularly in low- and middle-income countries.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "WHO",
+      "guideline"
+    ],
+    "tags": [
+      "guideline_development",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q92",
+    "question": "What class of drug is lenacapavir?",
+    "ground_truth": "Lenacapavir is an HIV-1 capsid inhibitor. It is the first drug in its class approved for HIV prevention.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "capsid inhibitor",
+      "HIV-1"
+    ],
+    "tags": [
+      "mechanism",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q93",
+    "question": "What is the N74D mutation and its significance for lenacapavir?",
+    "ground_truth": "N74D is a mutation associated with resistance to HIV-1 capsid inhibitors. It reduces susceptibility to lenacapavir by approximately 20-fold and is associated with approximately 50% reduction in replication capacity in vitro.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "capsid inhibitor",
+      "HIV-1"
+    ],
+    "tags": [
+      "mechanism",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q94",
+    "question": "What were the main drivers of injectable PrEP acceptability among users?",
+    "ground_truth": "Perceived low burden and ease of use, fit with lifestyle (convenient, allows for discreet use), and perceived effectiveness.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "acceptability",
+      "PrEP"
+    ],
+    "tags": [
+      "values_preferences",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q95",
+    "question": "What injection frequency preference was found comparing six-month and two-month injectable PrEP?",
+    "ground_truth": "All studies that compared six- and two-month injections found a clear preference for the six-month injection.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "acceptability",
+      "PrEP"
+    ],
+    "tags": [
+      "values_preferences",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q96",
+    "question": "What key research gaps does the WHO guideline identify for lenacapavir?",
+    "ground_truth": "Key gaps include optimal HIV testing strategies; best approaches to support access; adherence to dosing schedule; persistence of use; product switching and stopping; provision in some populations and geographies; costs and impacts; alternative injection sites and dosing; service delivery models for key populations including people who inject drugs.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "research",
+      "PrEP"
+    ],
+    "tags": [
+      "research_gaps",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q97",
+    "question": "Should further research gaps delay programmatic implementation of lenacapavir?",
+    "ground_truth": "No. The GDG stressed that further research should not delay programmatic implementation of lenacapavir in countries.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "research",
+      "PrEP"
+    ],
+    "tags": [
+      "research_gaps",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q98",
+    "question": "When are results of PURPOSE 4 (lenacapavir in people who inject drugs) expected?",
+    "ground_truth": "Results are expected in mid-2027.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "research",
+      "PrEP"
+    ],
+    "tags": [
+      "research_gaps",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q99",
+    "question": "How many people globally were using PrEP in 2023?",
+    "ground_truth": "About 3.5 million people in 2023, far short of the global 2025 target of 10.6 million person-years of PrEP protection.",
+    "expected_source_keywords": [
+      "HIV",
+      "incidence",
+      "PrEP"
+    ],
+    "tags": [
+      "epidemiology",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q100",
+    "question": "How many people were living with HIV globally and newly diagnosed in 2023?",
+    "ground_truth": "An estimated 39.9 million people living with HIV and 1.3 million people newly diagnosed in 2023.",
+    "expected_source_keywords": [
+      "HIV",
+      "incidence",
+      "PrEP"
+    ],
+    "tags": [
+      "epidemiology",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q101",
+    "question": "What should programmes offering lenacapavir monitor through routine data systems?",
+    "ground_truth": "Lenacapavir initiation and persistence, safety and adverse events including during pregnancy and breastfeeding, seroconversions, and drug resistance. Adverse event monitoring is of particular importance.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "monitoring",
+      "PrEP"
+    ],
+    "tags": [
+      "monitoring",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q102",
+    "question": "What should be done if a person on lenacapavir has an inconclusive HIV test status during continuation?",
+    "ground_truth": "Retest in 14 days using the national testing algorithm. If the serology profile remains inconclusive, the person is considered HIV-negative and LA-PrEP can be continued. They should be counselled to continue PrEP until a final diagnosis is available and to take precautions such as condom use.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "PrEP"
+    ],
+    "tags": [
+      "clinical_scenarios",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q103",
+    "question": "What should be done for a person taking lenacapavir who is newly diagnosed with HIV?",
+    "ground_truth": "ART should be initiated promptly to minimise drug resistance risks. Drug resistance testing should be done if available. The person should be linked to ART and HIV care services, ideally on the same day as diagnosis.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "PrEP"
+    ],
+    "tags": [
+      "clinical_scenarios",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q104",
+    "question": "What are the known best practices for switching from lenacapavir to other PrEP products?",
+    "ground_truth": "Currently, best practices are not yet known and should be explored as part of implementation studies. When switching, providers should ensure continuous HIV prevention coverage during the transition period. No drug-drug interactions are expected between lenacapavir and other PrEP products.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "discontinuation"
+    ],
+    "tags": [
+      "switching",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q105",
+    "question": "What should clients who discontinue lenacapavir be counselled about?",
+    "ground_truth": "They should be advised of the importance of HIV testing, encouraged to retest if risk behaviour takes place after stopping, informed that HIV detection might be delayed because of PrEP use, offered self-tests, and informed of the benefits of disclosing past PrEP use to future HIV testing providers.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "discontinuation"
+    ],
+    "tags": [
+      "switching",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q106",
+    "question": "What potential reduction in new HIV infections could lenacapavir achieve in South Africa over 20 years?",
+    "ground_truth": "One model estimated that lenacapavir could reduce new infections by 27-41% over 20 years in South Africa, with greater impact than scaling up oral PrEP or CAB-LA.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "cost",
+      "modelling"
+    ],
+    "tags": [
+      "cost_effectiveness",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q107",
+    "question": "What is the 2025 target for annual HIV infections under the Political Declaration on HIV and AIDS?",
+    "ground_truth": "Reducing annual HIV infections to under 370,000 by 2025.",
+    "expected_source_keywords": [
+      "HIV",
+      "incidence",
+      "PrEP"
+    ],
+    "tags": [
+      "epidemiology",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q108",
+    "question": "What is the HIV incidence rate in the lenacapavir arm of PURPOSE 2?",
+    "ground_truth": "0.10 per 100 person-years (95% CI: 0.01-0.37), with two incident infections.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q109",
+    "question": "What is the minimum dataset recommended for PrEP recording in national data systems?",
+    "ground_truth": "Date PrEP prescribed; date PrEP dispensed; PrEP product prescribed; volume of PrEP product prescribed/dispensed; date individual attends follow-up appointment.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "monitoring",
+      "PrEP"
+    ],
+    "tags": [
+      "monitoring",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q110",
+    "question": "What is the cost of one NAT test compared to one HIV RDT according to modelling cited in the guideline?",
+    "ground_truth": "NAT commodities cost an average of US$22 per test compared to US$4 for HIV RDTs in modelling studies.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q111",
+    "question": "What adherence pattern was observed for TDF/FTC in PURPOSE 2 at week 52?",
+    "ground_truth": "82% of participants had high adherence (four or more pills per week) at week 8, declining to 62% at week 52.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PURPOSE",
+      "efficacy",
+      "HIV"
+    ],
+    "tags": [
+      "efficacy",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q112",
+    "question": "What does the WHO guideline state about how often hepatitis testing should be repeated for lenacapavir users?",
+    "ground_truth": "Testing for HBV and HCV should be offered at initiation and repeated annually for those who test negative.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "PrEP",
+      "implementation"
+    ],
+    "tags": [
+      "implementation",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
+  },
+  {
+    "id": "q113",
+    "question": "What role can community-based organisations play in lenacapavir programmes?",
+    "ground_truth": "Community-based organisations can help educate and train communities about PrEP and HIV prevention options, deliver services in community settings, support monitoring of side-effects through community-led information sharing, and participate in designing and implementing programmes.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "community",
+      "PrEP"
+    ],
+    "tags": [
+      "community",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 2
+  },
+  {
+    "id": "q114",
+    "question": "What was the reduction in new HIV infections projected for lenacapavir among MSM in Thailand over 10 years if 95% of oral PrEP users transitioned to lenacapavir?",
+    "ground_truth": "One model predicted a 37% reduction in new infections over 10 years if 95% of oral PrEP users transitioned to lenacapavir with a two-year duration of use.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "cost",
+      "modelling"
+    ],
+    "tags": [
+      "cost_effectiveness",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 3
+  },
+  {
+    "id": "q115",
+    "question": "What is the number needed to test with NAT to detect one additional HIV case missed by RDT in a CAB-LA open-label extension study?",
+    "ground_truth": "At least 5,305 individuals would need to be tested using NAT to detect one additional case missed by RDT at an earlier stage, translating to costs ranging from US$46,684 to US$451,456 per case detected.",
+    "expected_source_keywords": [
+      "lenacapavir",
+      "HIV testing",
+      "RDT",
+      "PrEP"
+    ],
+    "tags": [
+      "testing",
+      "lenacapavir",
+      "HIV",
+      "PrEP"
+    ],
+    "difficulty": 1
   }
 ]

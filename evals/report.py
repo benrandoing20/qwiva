@@ -29,6 +29,7 @@ def save_report(
                 "answer_preview": r.answer[:200] + "..."
                 if len(r.answer) > 200
                 else r.answer,
+                "answer": r.answer,
                 "n_retrieved": len(r.retrieved_chunks),
                 "n_reranked": len(r.reranked_chunks),
                 "n_citations": len(r.citations),

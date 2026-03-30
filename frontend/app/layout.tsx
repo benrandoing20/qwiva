@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import PHProvider from '@/components/PHProvider'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
@@ -13,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans bg-[#0f0f0f] text-[#e8e8e8] antialiased`}>
-        {children}
+        <PHProvider>{children}</PHProvider>
       </body>
     </html>
   )
