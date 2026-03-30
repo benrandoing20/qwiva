@@ -500,6 +500,18 @@ class QwivaRAG:
                 f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
             )
 
+        # Surface last assistant message content so classifier knows what was already retrieved
+        retrieved_context = ""
+        if history:
+            last_assistant = next(
+                (m for m in reversed(history) if m["role"] == "assistant"), None
+            )
+            if last_assistant:
+                retrieved_context = (
+                    f"\nContent already retrieved and answered in this session:\n"
+                    f"{last_assistant['content'][:800]}\n"
+                )
+
         prompt = (
             "Classify this message for a clinical assistant.\n"
             "Reply with ONLY one word: rag OR chat\n\n"
@@ -511,10 +523,10 @@ class QwivaRAG:
             "so the assistant can ask what specific information is needed.\n\n"
             "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
             "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
-            "IMPORTANT: If the previous assistant turn already retrieved guideline sources AND the "
-            "current message asks for clarification, elaboration, or a follow-up on those sources, "
-            "classify as chat — do NOT trigger another RAG lookup.\n\n"
+            "IMPORTANT: If the content already retrieved (shown below) contains the information "
+            "needed to answer the current message, classify as chat — do NOT trigger another RAG lookup.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
+            + retrieved_context
             + f"Message: {query}"
         )
         try:
@@ -576,7 +588,12 @@ class QwivaRAG:
             "A physician just received the clinical answer below. Generate 3 follow-up "
             "questions they would realistically ask next, grounded in the specific information in the answer.\n\n"
             "Rules:\n"
-            "- Each question ≤12 words and must name a specific entity from the answer "
+            "- Each question ≤12 words and must name a CLINICAL entity from the answer: "
+            "a drug (amoxicillin, artesunate), a condition (eclampsia, sepsis), or a "
+            "procedure (magnesium sulphate infusion)\n"
+            "- Do NOT generate questions about diagnostic manuals (DSM-5-TR, ICD-11), "
+            "scoring systems (APGAR, GCS, SOFA), guideline names (WHO 2025, RCOG Green-top), "
+            "or classification systems — these are reference tools, not clinical entities to ask about\n"
             "- Natural next clinical steps: monitoring parameters, side effects of the "
             "named drug, alternative if first-line fails, paediatric vs adult dosing, "
             "or specific complication management\n"
@@ -656,7 +673,12 @@ class QwivaRAG:
 
     @cached_property
     def _extra_kwargs(self) -> dict:
-        """LiteLLM kwargs for the main generation model (Anthropic direct)."""
+        """LiteLLM kwargs — routes to NVIDIA hub when model uses openai/ prefix."""
+        if self._settings.litellm_model.startswith("openai/"):
+            return {
+                "api_key": self._settings.nvidia_api_key,
+                "api_base": self._settings.nvidia_api_base,
+            }
         extra: dict = {}
         if self._settings.anthropic_api_key:
             extra["api_key"] = self._settings.anthropic_api_key

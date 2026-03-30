@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import posthog from 'posthog-js'
 import { supabase, getAccessToken } from '@/lib/supabase'
 import { streamSearch, fetchConversations, fetchConversationMessages, deleteConversation } from '@/lib/api'
 import Navbar from '@/components/Navbar'
@@ -234,6 +235,10 @@ export default function HomePage() {
   // ------------------------------------------------------------------
   async function handleSearch(query: string) {
     if (!query.trim() || isLoading) return
+    posthog.capture('search_submitted', {
+      query_length: query.length,
+      is_followup: messages.length > 0,
+    })
     setInputValue('')
     resetScroll()
 
@@ -413,6 +418,11 @@ export default function HomePage() {
     }
   }
 
+  function handleSuggestionClick(suggestion: string) {
+    posthog.capture('suggestion_clicked', { suggestion })
+    handleSearch(suggestion)
+  }
+
   const hasMessages = messages.length > 0
   const showHero = !hasMessages && !activeConversationId && !isLoadingConversation
 
@@ -477,7 +487,7 @@ export default function HomePage() {
                 style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
               >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSearch} />
+                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSuggestionClick} />
                 ))}
                 <div ref={bottomRef} />
               </div>

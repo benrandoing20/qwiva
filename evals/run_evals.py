@@ -18,6 +18,11 @@ Options:
 import argparse
 import asyncio
 import json
+import warnings
+
+# supabase-py's aiohttp session has no public close() — suppress the noise
+warnings.filterwarnings("ignore", message="Unclosed client session")
+warnings.filterwarnings("ignore", message="Unclosed connector")
 
 from evals.config import EvalConfig
 from evals.dataset import load_dataset
@@ -41,7 +46,7 @@ def _load_pipeline_results_from_report(report_path: str, questions) -> list[Pipe
                 question=pq["question"],
                 retrieved_chunks=[],
                 reranked_chunks=[None] * pq["n_reranked"],
-                answer=pq.get("answer_preview", ""),
+                answer=pq.get("answer", pq.get("answer_preview", "")),
                 citations=[None] * pq["n_citations"],
                 contexts=[],
                 embed_ms=pq["latency_ms"]["embed"],
@@ -84,10 +89,17 @@ async def main(args: argparse.Namespace) -> None:
             pipeline_results.append(result)
             status = f"ERROR {result.error[:40]}" if result.error else f"OK {result.total_ms:.0f}ms"
             print(status)
+            if i < len(questions) and args.delay > 0:
+                await asyncio.sleep(args.delay)
 
     # Compute metrics
     latency = compute_latency(pipeline_results)
     clinical = compute_clinical(pipeline_results, questions)
+
+    # Save pipeline checkpoint before running judges — so a judge crash doesn't lose everything
+    checkpoint_path = save_report(pipeline_results, latency, clinical)
+    print(f"[eval] Pipeline checkpoint → {checkpoint_path}")
+    print(f"[eval] Re-run judges only:   --skip-pipeline --report {checkpoint_path}\n")
 
     ragas_report = None
     if config.run_ragas:
@@ -137,5 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip-deepeval", action="store_true")
     parser.add_argument("--report", default=None, help="Existing report JSON (required with --skip-pipeline)")
     parser.add_argument("--dataset", default="evals/datasets/clinical_questions.json")
+    parser.add_argument("--delay", type=float, default=2.0,
+                        help="Seconds between questions (default 2.0 — avoids Groq 30 req/min limit)")
     args = parser.parse_args()
     asyncio.run(main(args))

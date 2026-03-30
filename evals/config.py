@@ -17,9 +17,8 @@ class EvalConfig:
         s = get_settings()
         if self.judge_model is None:
             # Route judge through NVIDIA hub (OpenAI-compat) using existing NVIDIA_API_KEY.
-            # The hub hosts Claude Sonnet 4.6 as aws/anthropic/claude-sonnet-4-6.
             # "openai/" prefix tells LiteLLM to use the OpenAI-compatible endpoint.
-            self.judge_model = "openai/aws/anthropic/claude-sonnet-4-6"
+            self.judge_model = "openai/aws/anthropic/bedrock-claude-opus-4-6"
         if self.judge_api_key is None:
             self.judge_api_key = s.nvidia_api_key
         if self.judge_api_base is None:
