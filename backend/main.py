@@ -18,9 +18,14 @@ try:
 except Exception:
     pass
 
-from fastapi import Depends, FastAPI, HTTPException
+import jwt as pyjwt
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.auth import verify_token
 from backend.config import get_settings
@@ -48,7 +53,38 @@ from backend.rag import rag
 
 _settings = get_settings()
 
+
+def _limit_key(request: Request) -> str:
+    """Rate-limit by user_id extracted from JWT.
+
+    Falls back to remote IP so unauthenticated probes are also throttled.
+    Per-user keying is important for Kenyan mobile networks where many users
+    share the same carrier-NAT IP address.
+    """
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        try:
+            payload = pyjwt.decode(
+                auth[7:],
+                _settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+            uid = payload.get("sub")
+            if uid:
+                return uid
+        except Exception:
+            pass
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_limit_key)
+
 app = FastAPI(title="Qwiva API", version="0.1.0")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.onrender.com", "localhost", "127.0.0.1"])
 
 
 @app.on_event("startup")
@@ -215,7 +251,9 @@ _MAX_QUERY_LEN = 2000
 
 
 @app.post("/search/stream")
+@limiter.limit("15/minute")
 async def search_stream(
+    request: Request,
     body: SearchRequest,
     user: UserProfile = Depends(verify_token),
 ) -> StreamingResponse:
@@ -232,10 +270,24 @@ async def search_stream(
             conversation_id = body.conversation_id
             parent_message_id = body.parent_message_id
 
-            # Create conversation on first turn if none provided
+            # Resolve / create conversation.
+            # If conversation_id was provided but no longer exists in the DB
+            # (e.g. after a DB reset or the row was deleted), fall back to a
+            # new conversation rather than crashing with a FK constraint error.
             if not conversation_id:
                 row = await create_conversation(user.user_id)
                 conversation_id = row["id"]
+                is_new_conversation = True
+            else:
+                conv = await get_conversation(conversation_id, user.user_id)
+                if conv:
+                    is_new_conversation = False
+                else:
+                    # Stale id — start fresh
+                    row = await create_conversation(user.user_id)
+                    conversation_id = row["id"]
+                    parent_message_id = None  # old parent belongs to deleted conversation
+                    is_new_conversation = True
 
             # Persist user message
             user_msg = await append_user_message(
@@ -254,7 +306,6 @@ async def search_stream(
 
             # Start title generation immediately for new conversations — runs in parallel
             # with the full RAG pipeline so the title is ready before the answer finishes.
-            is_new_conversation = not body.conversation_id
             title_task: asyncio.Task | None = (
                 asyncio.create_task(_generate_title(body.query))
                 if is_new_conversation
@@ -285,6 +336,7 @@ async def search_stream(
             tokens: list[str] = []
             citations = []
             evidence_grade = ""
+            suggestions_list: list[str] = []
 
             generator = (
                 rag.stream_chat(body.query, user.user_id, history)
@@ -298,7 +350,7 @@ async def search_stream(
                 if chunk.startswith("event: done"):
                     continue
                 yield chunk
-                # Parse SSE to capture citations and tokens for persistence
+                # Parse SSE to capture citations, tokens, and suggestions for persistence
                 if chunk.startswith("event: citations"):
                     data_line = chunk.split("\ndata: ", 1)[-1].strip()
                     try:
@@ -312,6 +364,12 @@ async def search_stream(
                     data_line = chunk.split("\ndata: ", 1)[-1].strip()
                     try:
                         tokens.append(_json.loads(data_line).get("token", ""))
+                    except Exception:
+                        pass
+                elif chunk.startswith("event: suggestions"):
+                    data_line = chunk.split("\ndata: ", 1)[-1].strip()
+                    try:
+                        suggestions_list = _json.loads(data_line).get("suggestions", [])
                     except Exception:
                         pass
 
@@ -334,6 +392,11 @@ async def search_stream(
                 citations=cited_citations,
                 evidence_grade=evidence_grade,
             )
+            if suggestions_list:
+                db = await get_db()
+                await db.table("messages").update(
+                    {"suggestions": suggestions_list}
+                ).eq("id", assistant_msg["id"]).execute()
             yield f"event: done\ndata: {_json.dumps({'assistant_message_id': assistant_msg['id']})}\n\n"
 
         except Exception as exc:

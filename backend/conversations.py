@@ -222,10 +222,33 @@ async def append_assistant_message(
 
 
 async def get_active_path(conversation_id: str) -> list[dict]:
-    """Calls the get_active_path DB function — returns ordered message list."""
+    """Calls the get_active_path DB function — returns ordered message list.
+
+    The RPC was created before the suggestions column existed, so we fetch
+    suggestions in a single follow-up query and merge them in.
+    """
     db = await get_db()
     res = await db.rpc("get_active_path", {"p_conversation_id": conversation_id}).execute()
-    return res.data or []
+    messages = res.data or []
+    if not messages:
+        return messages
+
+    # Bulk-fetch suggestions (not returned by the RPC) and merge into each row
+    msg_ids = [m["id"] for m in messages]
+    try:
+        sugg_res = (
+            await db.table("messages")
+            .select("id, suggestions")
+            .in_("id", msg_ids)
+            .execute()
+        )
+        sugg_map = {row["id"]: row.get("suggestions") for row in (sugg_res.data or [])}
+        for m in messages:
+            m.setdefault("suggestions", sugg_map.get(m["id"]))
+    except Exception:
+        pass  # suggestions column may not exist yet — degrade gracefully
+
+    return messages
 
 
 async def get_siblings(parent_message_id: str) -> list[dict]:

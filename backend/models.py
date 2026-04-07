@@ -75,6 +75,7 @@ class MessageOut(BaseModel):
     content: str
     citations: list[Citation] | None = None
     evidence_grade: str | None = None
+    suggestions: list[str] | None = None
     branch_index: int
     created_at: str
 
