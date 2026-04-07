@@ -13,23 +13,51 @@
 }
 
 @layer base {
+  /* Default = dark (matches SSR html class + first paint before theme script runs). */
   :root {
-    --bg: #0f0f0f;
-    --surface: #1a1a1a;
-    --border: #2a2a2a;
-    --text: #e8e8e8;
-    --muted: #6b6b6b;
-    --accent: #14b8a6;
+    color-scheme: dark;
+    --brand-bg-rgb: 5 5 16;
+    --brand-surface-rgb: 19 26 53;
+    --brand-raised-rgb: 22 29 61;
+    --brand-border-rgb: 42 53 88;
+    --brand-navy-rgb: 26 35 78;
+    --brand-text-rgb: 238 240 247;
+    --brand-muted-rgb: 139 146 176;
+    --brand-subtle-rgb: 92 100 136;
+    --brand-accent-rgb: 168 85 247;
+    --brand-accent-hover-rgb: 192 132 252;
+    --brand-pink-rgb: 244 114 182;
+  }
+
+  html.light {
+    color-scheme: light;
+    --brand-bg-rgb: 246 248 252;
+    --brand-surface-rgb: 255 255 255;
+    --brand-raised-rgb: 232 235 245;
+    --brand-border-rgb: 200 206 226;
+    --brand-navy-rgb: 26 35 78;
+    --brand-text-rgb: 26 35 78;
+    --brand-muted-rgb: 92 100 136;
+    --brand-subtle-rgb: 139 146 176;
+    --brand-accent-rgb: 168 85 247;
+    --brand-accent-hover-rgb: 147 51 234;
+    --brand-pink-rgb: 244 114 182;
   }
 
   html {
-    background-color: var(--bg);
-    color: var(--text);
+    background-color: rgb(var(--brand-bg-rgb));
+    color: rgb(var(--brand-text-rgb));
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--brand-border-rgb));
+    border-radius: 3px;
+  }
 }

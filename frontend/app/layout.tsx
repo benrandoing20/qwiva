@@ -1,9 +1,14 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 import PHProvider from '@/components/PHProvider'
+import { ThemeProvider } from '@/components/ThemeProvider'
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
+const brandSans = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-brand',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'Qwiva — Clinical Search',
@@ -12,9 +17,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} font-sans bg-[#0f0f0f] text-[#e8e8e8] antialiased`}>
-        <PHProvider>{children}</PHProvider>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className={`${brandSans.variable} font-sans bg-brand-bg text-brand-text antialiased`}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem={false}
+          storageKey="qwiva-theme"
+        >
+          <PHProvider>{children}</PHProvider>
+        </ThemeProvider>
       </body>
     </html>
   )
