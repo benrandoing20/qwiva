@@ -45,13 +45,13 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
   const processed = normalised.replace(/\[(\d+(?:-\d+)?)\]/g, '<cite data-n="$1">$1</cite>')
 
   return (
-    <div className="prose prose-sm prose-invert max-w-none
-      prose-p:text-[#d4d4d4] prose-p:leading-7 prose-p:my-3
-      prose-headings:text-[#e8e8e8] prose-headings:font-semibold
-      prose-strong:text-[#e8e8e8] prose-strong:font-semibold
-      prose-ul:text-[#d4d4d4] prose-li:my-1
-      prose-code:text-teal-400 prose-code:bg-teal-500/10 prose-code:rounded prose-code:px-1
-      prose-a:text-teal-400 prose-a:no-underline hover:prose-a:underline">
+    <div className="prose prose-sm max-w-none dark:prose-invert
+      prose-p:text-brand-text/90 prose-p:leading-7 prose-p:my-3
+      prose-headings:text-brand-text prose-headings:font-semibold
+      prose-strong:text-brand-text prose-strong:font-semibold
+      prose-ul:text-brand-text/90 prose-li:my-1
+      prose-code:text-brand-accent-hover prose-code:bg-brand-accent/12 prose-code:rounded prose-code:px-1
+      prose-a:text-brand-accent-hover prose-a:no-underline hover:prose-a:underline">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
@@ -72,7 +72,7 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
             if (isStreaming || !citation) {
               return (
                 <sup>
-                  <span className="inline-flex items-center justify-center w-4 h-4 ml-0.5 text-[9px] font-bold text-teal-400 bg-teal-500/10 border border-teal-500/20 rounded-full cursor-default select-none">
+                  <span className="inline-flex items-center justify-center w-4 h-4 ml-0.5 text-[9px] font-bold text-brand-accent-hover bg-brand-accent/12 border border-brand-accent/25 rounded-full cursor-default select-none">
                     {n}
                   </span>
                 </sup>
@@ -85,32 +85,37 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
             return (
               <span className="relative inline-block group align-baseline mx-0.5">
                 {/* Inline pill */}
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-teal-400 bg-teal-500/10 border border-teal-500/20 rounded cursor-default select-none hover:bg-teal-500/20 transition-colors leading-none">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-brand-accent-hover bg-brand-accent/12 border border-brand-accent/25 rounded cursor-default select-none hover:bg-brand-accent/22 transition-colors leading-none">
                   <span className="opacity-60">{n}</span>
                   <span className="max-w-[72px] truncate">{label}</span>
                 </span>
 
                 {/* Hover tooltip — pure CSS, no JS state */}
                 <span className="absolute bottom-full left-0 pb-2 z-50 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto w-80">
-                  <span className="block bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg shadow-2xl p-3 text-left">
-                    <span className="block text-xs font-semibold text-[#e8e8e8] leading-snug mb-1">
+                  <span className="block bg-brand-surface border border-brand-border rounded-lg shadow-2xl p-3 text-left">
+                    <span className="block text-xs font-semibold text-brand-text leading-snug mb-1">
                       {citation.guideline_title}
                     </span>
                     {citation.section && (
-                      <span className="block text-[11px] text-[#9a9a9a] mb-1">
-                        § {citation.section}
+                      <span className="block text-[11px] text-brand-muted mb-1">
+                        Section: {citation.section}
                       </span>
                     )}
-                    <span className="block text-[11px] text-[#6b6b6b] mb-2">
+                    <span className="block text-[11px] text-brand-subtle mb-2">
                       {[citation.publisher, citation.year].filter(Boolean).join(' · ')}
                     </span>
                     {chunk && (
                       <>
-                        <span className="block text-[10px] font-semibold text-[#4a4a4a] uppercase tracking-wider mb-1">
+                        <span className="block text-[10px] font-semibold text-brand-subtle uppercase tracking-wider mb-1">
                           Retrieved excerpt
                         </span>
-                        <span className="block text-[11px] text-[#9a9a9a] leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
-                          {chunk}
+                        <span className="block text-[11px] text-brand-muted leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
+                          {chunk
+                            .replace(/\bchunks\b/g, 'references')
+                            .replace(/\bChunks\b/g, 'References')
+                            .replace(/\bchunk\b/g, 'reference')
+                            .replace(/\bChunk\b/g, 'Reference')
+                          }
                         </span>
                       </>
                     )}

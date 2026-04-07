@@ -42,9 +42,11 @@ async def run_deepeval(
         """DeepEvalBaseLLM subclass that routes through LiteLLM → NVIDIA hub."""
 
         def __init__(self, model: str, api_key: str, api_base: str):
+            import asyncio
             self._model = model
             self._api_key = api_key
             self._api_base = api_base
+            self._sem = asyncio.Semaphore(3)  # cap concurrent NVIDIA hub judge calls
             super().__init__(model)
 
         def get_model_name(self) -> str:
@@ -65,29 +67,42 @@ async def run_deepeval(
             text = resp.choices[0].message.content
             if schema is None:
                 return text
-            # Non-native model path: return schema instance directly (no tuple)
+            # Non-native model path: return schema instance directly (no tuple).
+            # Use raw_decode so trailing text/newlines after the JSON don't crash.
             try:
                 clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
-                return schema(**json.loads(clean))
+                obj, _ = json.JSONDecoder().raw_decode(clean.strip())
+                return schema(**obj)
             except Exception as exc:
                 raise TypeError(str(exc)) from exc
 
         async def a_generate(self, prompt: str, schema=None, **_):
-            import json, re
+            import asyncio, json, re
 
-            resp = await litellm.acompletion(
-                model=self._model,
-                messages=[{"role": "user", "content": prompt}],
-                api_key=self._api_key,
-                api_base=self._api_base,
-            )
+            for attempt in range(4):
+                try:
+                    async with self._sem:
+                        resp = await litellm.acompletion(
+                            model=self._model,
+                            messages=[{"role": "user", "content": prompt}],
+                            api_key=self._api_key,
+                            api_base=self._api_base,
+                        )
+                    break
+                except litellm.RateLimitError:
+                    if attempt == 3:
+                        raise
+                    await asyncio.sleep(15 * (attempt + 1))
+
             text = resp.choices[0].message.content
             if schema is None:
                 return text
-            # Non-native model path: return schema instance directly (no tuple)
+            # Non-native model path: return schema instance directly (no tuple).
+            # Use raw_decode so trailing text/newlines after the JSON don't crash.
             try:
                 clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
-                return schema(**json.loads(clean))
+                obj, _ = json.JSONDecoder().raw_decode(clean.strip())
+                return schema(**obj)
             except Exception as exc:
                 raise TypeError(str(exc)) from exc
 

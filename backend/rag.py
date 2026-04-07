@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
@@ -500,6 +501,18 @@ class QwivaRAG:
                 f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
             )
 
+        # Surface last assistant message content so classifier knows what was already retrieved
+        retrieved_context = ""
+        if history:
+            last_assistant = next(
+                (m for m in reversed(history) if m["role"] == "assistant"), None
+            )
+            if last_assistant:
+                retrieved_context = (
+                    f"\nContent already retrieved and answered in this session:\n"
+                    f"{last_assistant['content'][:800]}\n"
+                )
+
         prompt = (
             "Classify this message for a clinical assistant.\n"
             "Reply with ONLY one word: rag OR chat\n\n"
@@ -511,10 +524,10 @@ class QwivaRAG:
             "so the assistant can ask what specific information is needed.\n\n"
             "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
             "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
-            "IMPORTANT: If the previous assistant turn already retrieved guideline sources AND the "
-            "current message asks for clarification, elaboration, or a follow-up on those sources, "
-            "classify as chat — do NOT trigger another RAG lookup.\n\n"
+            "IMPORTANT: If the content already retrieved (shown below) contains the information "
+            "needed to answer the current message, classify as chat — do NOT trigger another RAG lookup.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
+            + retrieved_context
             + f"Message: {query}"
         )
         try:
@@ -576,12 +589,22 @@ class QwivaRAG:
             "A physician just received the clinical answer below. Generate 3 follow-up "
             "questions they would realistically ask next, grounded in the specific information in the answer.\n\n"
             "Rules:\n"
-            "- Each question ≤12 words and must name a specific entity from the answer "
-            "- Natural next clinical steps: monitoring parameters, side effects of the "
-            "named drug, alternative if first-line fails, paediatric vs adult dosing, "
-            "or specific complication management\n"
+            "- Each question ≤12 words and must name a CLINICAL entity from the answer: "
+            "a drug (amoxicillin, artesunate), a condition (eclampsia, sepsis), or a "
+            "procedure (magnesium sulphate infusion)\n"
+            "- Do NOT generate questions about diagnostic manuals (DSM-5-TR, ICD-11), "
+            "scoring systems (APGAR, GCS, SOFA), guideline names (WHO 2025, RCOG Green-top), "
+            "or classification systems — these are reference tools, not clinical entities to ask about\n"
+            "- Natural next clinical steps: monitoring parameters for a named drug or condition, "
+            "adverse effects or dosing only for actual DRUGS (not foods or nutrition products), "
+            "alternative if first-line fails, paediatric vs adult dosing, or complication management\n"
+            "- Therapeutic milks and nutrition products (F75, F100, RUTF, Plumpy'Nut, ORS, EBM, "
+            "formula feeds) are NOT drugs. Do NOT ask about their 'side effects', 'dosing', or "
+            "'drug interactions'. For nutrition products, valid questions concern: when to switch "
+            "formulations, feeding volumes, or specific feeding complications\n"
+            "- Each suggestion must be a complete English question (subject + verb), 5–12 words, ending with '?'\n"
             "- Do NOT generate generic questions — 'What are the side effects?' is wrong; "
-            "'What are the side effects of amoxicillin?' is correct\n"
+            "'What are the side effects of amoxicillin in SAM?' is correct\n"
             "- Do not repeat a question already answered in the conversation\n"
             "- Return ONLY a JSON array of exactly 3 strings, or the word null if the "
             "answer was conversational/social and no clinical follow-up adds value\n\n"
@@ -603,7 +626,11 @@ class QwivaRAG:
                 return []
             suggestions = json.loads(raw)
             if isinstance(suggestions, list) and suggestions:
-                return [str(s) for s in suggestions[:3]]
+                grounded = [
+                    str(s) for s in suggestions[:3]
+                    if _suggestion_grounded(str(s), answer)
+                ]
+                return grounded
         except Exception:
             pass
         return []
@@ -656,11 +683,29 @@ class QwivaRAG:
 
     @cached_property
     def _extra_kwargs(self) -> dict:
-        """LiteLLM kwargs for the main generation model (Anthropic direct)."""
-        extra: dict = {}
-        if self._settings.anthropic_api_key:
-            extra["api_key"] = self._settings.anthropic_api_key
-        return extra
+        """LiteLLM kwargs — routes credentials by model prefix.
+
+        Supported prefixes:
+          groq/          → GROQ_API_KEY
+          openai/aws/    → NVIDIA hub (Bedrock models)
+          openai/azure/  → NVIDIA hub (Azure models)
+          openai/        → OpenAI direct (OPENAI_API_KEY) or NVIDIA hub fallback
+          anthropic/     → ANTHROPIC_API_KEY
+        """
+        model = self._settings.litellm_model
+        s = self._settings
+        if model.startswith("groq/"):
+            return {"api_key": s.groq_api_key} if s.groq_api_key else {}
+        if model.startswith("openai/aws/") or model.startswith("openai/azure/"):
+            return {"api_key": s.nvidia_api_key, "api_base": s.nvidia_api_base}
+        if model.startswith("openai/"):
+            if s.openai_api_key:
+                return {"api_key": s.openai_api_key}
+            # Fall back to NVIDIA hub for other openai/ prefixed models
+            return {"api_key": s.nvidia_api_key, "api_base": s.nvidia_api_base}
+        if model.startswith("anthropic/"):
+            return {"api_key": s.anthropic_api_key} if s.anthropic_api_key else {}
+        return {}
 
     @cached_property
     def _classify_kwargs(self) -> dict:
@@ -827,6 +872,66 @@ def _derive_evidence_grade(chunks: list[Chunk]) -> str:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+_SUGGESTION_STOP_WORDS = {
+    "what", "which", "should", "would", "could", "given", "after",
+    "before", "during", "about", "these", "their", "there", "where",
+    "when", "while", "since", "until", "other", "first", "second",
+}
+
+# Patterns that indicate a suggestion is asking drug-pharmacology questions
+_DRUG_QUESTION_RE = re.compile(
+    r"\b(side effects?|adverse effects?|doses?|dosing|dosage|drug interactions?|contraindications?)\b",
+    re.IGNORECASE,
+)
+
+# Therapeutic nutrition products that must NOT be framed as drugs
+_NUTRITION_PRODUCTS = {
+    "f75", "f100", "rutf", "plumpy", "ors", "ebm",
+    "formula", "therapeutic milk", "therapeutic food",
+}
+
+# Drug-dose markers: their presence in the answer confirms something drug-like is being discussed
+_DRUG_MARKERS_RE = re.compile(
+    r"\b(\d+\s*mg|\d+\s*mcg|\d+\s*ml/kg|\d+\s*iu\b"
+    r"|tablets?|capsules?|intravenous|infusion|injection|oral dose)\b",
+    re.IGNORECASE,
+)
+
+
+def _suggestion_grounded(suggestion: str, answer: str) -> bool:
+    """Return True if the suggestion is grounded, grammatical, and appropriately framed.
+
+    Three checks (in order):
+    A. Completeness — must be ≥5 words and end with '?'
+    B. Drug-framing appropriateness — drug-pharmacology templates ('side effects',
+       'dosing', etc.) only pass if (i) the entity is not a known nutrition product
+       AND (ii) the answer contains at least one drug-dose marker
+    C. Entity grounding — every capitalised entity word ≥5 chars must appear verbatim
+       in the answer (case-insensitive)
+    """
+    stripped = suggestion.strip()
+
+    # A. Grammar / completeness
+    if not stripped.endswith("?") or len(stripped.split()) < 5:
+        return False
+
+    # B. Drug-type framing must match actual drugs in the answer
+    if _DRUG_QUESTION_RE.search(stripped):
+        sugg_lower = stripped.lower()
+        if any(np in sugg_lower for np in _NUTRITION_PRODUCTS):
+            return False
+        if not _DRUG_MARKERS_RE.search(answer):
+            return False
+
+    # C. Named entity grounding
+    answer_lower = answer.lower()
+    words = re.findall(r"\b[A-Za-z]{5,}\b", stripped)
+    entity_words = [w for w in words if w[0].isupper() and w.lower() not in _SUGGESTION_STOP_WORDS]
+    if not entity_words:
+        return True
+    return all(w.lower() in answer_lower for w in entity_words)
 
 
 def _rrf_merge(

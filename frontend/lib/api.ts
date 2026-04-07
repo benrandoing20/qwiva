@@ -123,6 +123,9 @@ export async function fetchConversationMessages(
       content: msg.content ?? '',
       citations,
       evidence_grade: msg.evidence_grade ?? undefined,
+      suggestions: Array.isArray(msg.suggestions) && msg.suggestions.length > 0
+        ? msg.suggestions
+        : undefined,
       isStreaming: false,
       isError: false,
     }

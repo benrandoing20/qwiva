@@ -30,10 +30,13 @@ async def run_question(question: str) -> PipelineResult:
     chunks: list = []
     reranked: list = []
     try:
-        # 0. Routing (classify)
+        # 0. Routing (classify) — latency measurement only; result discarded
         t = time.perf_counter()
-        await rag.classify(question, [])
-        classify_ms = (time.perf_counter() - t) * 1000
+        try:
+            await rag.classify(question, [])
+            classify_ms = (time.perf_counter() - t) * 1000
+        except Exception:
+            classify_ms = 0.0  # rate-limited or unavailable; don't fail the question
 
         # 1. Embed
         t = time.perf_counter()
@@ -93,6 +96,7 @@ async def run_question(question: str) -> PipelineResult:
             retrieval_ms=retrieval_ms,
             rerank_ms=rerank_ms,
             ttft_ms=ttft_ms,
+            total_generation_ms=total_generation_ms,
             total_ms=(time.perf_counter() - t_start) * 1000,
             error=traceback.format_exc(),
         )
