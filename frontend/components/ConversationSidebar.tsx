@@ -28,8 +28,8 @@ function relativeTime(dateStr: string): string {
 function SkeletonItem() {
   return (
     <div className="px-3 py-2.5 rounded-xl animate-pulse">
-      <div className="h-3 bg-[#2a2a2a] rounded w-4/5 mb-1.5" />
-      <div className="h-2.5 bg-[#222] rounded w-1/3" />
+      <div className="h-3 bg-brand-border rounded w-4/5 mb-1.5" />
+      <div className="h-2.5 bg-brand-raised rounded w-1/3" />
     </div>
   )
 }
@@ -54,12 +54,12 @@ export default function ConversationSidebar({
         />
       )}
 
-      <aside className={`flex flex-col w-[260px] flex-shrink-0 border-r border-[#1e1e1e] bg-[#0f0f0f] overflow-hidden fixed top-14 bottom-0 left-0 z-40 transition-transform duration-300 ease-in-out md:static md:top-auto md:bottom-auto md:z-auto md:h-full md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`flex flex-col w-[260px] flex-shrink-0 bg-brand-bg overflow-hidden fixed top-14 bottom-0 left-0 z-40 transition-transform duration-300 ease-in-out md:static md:top-auto md:bottom-auto md:z-auto md:h-full md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       {/* New conversation button */}
-      <div className="p-3 border-b border-[#1e1e1e]">
+      <div className="p-3">
         <button
           onClick={onNew}
-          className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-white text-sm font-medium transition-colors"
+          className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-brand-accent hover:bg-brand-accent-hover text-white text-sm font-medium transition-colors shadow-[0_0_24px_-6px_rgba(168,85,247,0.55)]"
         >
           <svg
             width="13"
@@ -87,7 +87,7 @@ export default function ConversationSidebar({
             ))}
           </div>
         ) : conversations.length === 0 ? (
-          <p className="text-xs text-[#4a4a4a] text-center mt-6 px-4">
+          <p className="text-xs text-brand-subtle text-center mt-6 px-4">
             No conversations yet
           </p>
         ) : (
@@ -101,14 +101,14 @@ export default function ConversationSidebar({
                     disabled={isActive}
                     className={`w-full text-left px-3 py-2.5 pr-8 rounded-xl transition-colors ${
                       isActive
-                        ? 'bg-[#1e1e1e] text-[#e8e8e8] cursor-default'
-                        : 'text-[#9a9a9a] hover:bg-[#171717] hover:text-[#e8e8e8]'
+                        ? 'bg-brand-raised text-brand-text cursor-default'
+                        : 'text-brand-muted hover:bg-brand-surface/80 hover:text-brand-text'
                     }`}
                   >
                     <p className="text-sm font-medium truncate leading-snug">
                       {conv.title ?? 'New conversation'}
                     </p>
-                    <p className="text-[11px] text-[#4a4a4a] mt-0.5 group-hover:text-[#6b6b6b] transition-colors">
+                    <p className="text-[11px] text-brand-subtle mt-0.5 group-hover:text-brand-muted transition-colors">
                       {relativeTime(conv.updated_at)}
                     </p>
                   </button>
@@ -120,7 +120,7 @@ export default function ConversationSidebar({
                       onDelete(conv.id)
                     }}
                     title="Delete conversation"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-red-500/20 text-[#4a4a4a] hover:text-red-400"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-red-500/20 text-brand-subtle hover:text-red-400"
                   >
                     <svg
                       width="13"

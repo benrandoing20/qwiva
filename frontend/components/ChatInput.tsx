@@ -37,7 +37,7 @@ export default function ChatInput({ value, onChange, onSubmit, isLoading, inConv
   }
 
   return (
-    <div className="flex items-end gap-3 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 focus-within:border-teal-500/50 transition-colors">
+    <div className="flex items-end gap-3 w-full bg-brand-surface border border-brand-border rounded-2xl px-4 py-3 focus-within:border-brand-accent/45 focus-within:ring-1 focus-within:ring-brand-accent/15 transition-colors">
       <textarea
         ref={textareaRef}
         value={value}
@@ -46,12 +46,12 @@ export default function ChatInput({ value, onChange, onSubmit, isLoading, inConv
         disabled={isLoading}
         placeholder={inConversation ? 'Ask a follow-up…' : 'Ask a clinical question…'}
         rows={1}
-        className="flex-1 bg-transparent text-[#e8e8e8] placeholder-[#4a4a4a] text-sm resize-none outline-none leading-6 disabled:opacity-50 min-h-[24px]"
+        className="flex-1 bg-transparent text-brand-text placeholder-brand-subtle text-sm resize-none outline-none leading-6 disabled:opacity-50 min-h-[24px]"
       />
       <button
         onClick={handleSubmit}
         disabled={isLoading || !value.trim()}
-        className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-teal-500 hover:bg-teal-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-brand-accent hover:bg-brand-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-[0_0_20px_-4px_rgba(168,85,247,0.5)]"
         aria-label="Send"
       >
         {isLoading ? (

@@ -116,7 +116,7 @@ export default function LearnPage() {
   const xpPct = (xpInCurrentCredit / XP_PER_CREDIT) * 100
 
   return (
-    <div className="min-h-screen bg-[#0f0f0f]">
+    <div className="min-h-screen bg-brand-bg">
       <Navbar />
 
       <main className="max-w-3xl mx-auto px-6 pt-24 pb-32">
@@ -124,14 +124,14 @@ export default function LearnPage() {
         {/* ------------------------------------------------------------------ */}
         {/* Hero */}
         {/* ------------------------------------------------------------------ */}
-        <div className="pt-10 pb-12 border-b border-[#1a1a1a]">
-          <p className="text-xs text-teal-500 uppercase tracking-widest font-semibold mb-3">
+        <div className="pt-10 pb-12 border-b border-brand-border/50">
+          <p className="text-xs text-brand-accent uppercase tracking-widest font-semibold mb-3">
             Learning Hub
           </p>
-          <h1 className="text-3xl font-bold text-white tracking-tight leading-snug mb-4">
+          <h1 className="text-3xl font-bold text-brand-text tracking-tight leading-snug mb-4">
             Turn clinical lookups<br />into CME credits.
           </h1>
-          <p className="text-[#6b6b6b] text-sm leading-relaxed max-w-lg">
+          <p className="text-brand-muted text-sm leading-relaxed max-w-lg">
             Each lesson is built from the same guidelines you search every day.
             Complete structured tracks to build verifiable competency across a specialty —
             not just isolated facts.
@@ -141,17 +141,17 @@ export default function LearnPage() {
         {/* ------------------------------------------------------------------ */}
         {/* Progress */}
         {/* ------------------------------------------------------------------ */}
-        <div className="py-10 border-b border-[#1a1a1a]">
+        <div className="py-10 border-b border-brand-border/50">
           <div className="flex items-center justify-between mb-6">
-            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
+            <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest">
               Your progress
             </p>
-            <div className="flex items-center gap-5 text-xs text-[#6b6b6b]">
+            <div className="flex items-center gap-5 text-xs text-brand-muted">
               <span>
-                <span className="text-white font-semibold">{streakDays}</span> day streak
+                <span className="text-brand-text font-semibold">{streakDays}</span> day streak
               </span>
               <span>
-                <span className="text-white font-semibold">{xp.toLocaleString()}</span> XP total
+                <span className="text-brand-text font-semibold">{xp.toLocaleString()}</span> XP total
               </span>
             </div>
           </div>
@@ -160,31 +160,31 @@ export default function LearnPage() {
           <div className="mb-6">
             <div className="flex items-end justify-between mb-2">
               <div>
-                <span className="text-2xl font-bold text-white">{cmeCredits.toFixed(1)}</span>
-                <span className="text-sm text-[#6b6b6b] ml-2">of {CME_REQUIRED} CME credits</span>
+                <span className="text-2xl font-bold text-brand-text">{cmeCredits.toFixed(1)}</span>
+                <span className="text-sm text-brand-muted ml-2">of {CME_REQUIRED} CME credits</span>
               </div>
-              <span className="text-xs text-[#4a4a4a]">
+              <span className="text-xs text-brand-subtle">
                 {(CME_REQUIRED - cmeCredits).toFixed(1)} remaining
               </span>
             </div>
-            <div className="w-full h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-brand-surface rounded-full overflow-hidden">
               <div
-                className="h-full bg-teal-500 rounded-full transition-all duration-700"
+                className="h-full bg-gradient-to-r from-brand-accent to-brand-pink rounded-full transition-all duration-700"
                 style={{ width: `${creditPct}%` }}
               />
             </div>
-            <p className="text-xs text-[#4a4a4a] mt-2">Kenya MPDC annual requirement</p>
+            <p className="text-xs text-brand-subtle mt-2">Kenya MPDC annual requirement</p>
           </div>
 
           {/* XP to next credit */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-[#6b6b6b]">Next credit</p>
-              <p className="text-xs text-[#4a4a4a]">{xpInCurrentCredit} / {XP_PER_CREDIT} XP</p>
+              <p className="text-xs text-brand-muted">Next credit</p>
+              <p className="text-xs text-brand-subtle">{xpInCurrentCredit} / {XP_PER_CREDIT} XP</p>
             </div>
-            <div className="w-full h-1 bg-[#1a1a1a] rounded-full overflow-hidden">
+            <div className="w-full h-1 bg-brand-surface rounded-full overflow-hidden">
               <div
-                className="h-full bg-teal-500/60 rounded-full transition-all duration-700"
+                className="h-full bg-brand-accent/55 rounded-full transition-all duration-700"
                 style={{ width: `${xpPct}%` }}
               />
             </div>
@@ -194,12 +194,12 @@ export default function LearnPage() {
         {/* ------------------------------------------------------------------ */}
         {/* Learning tracks */}
         {/* ------------------------------------------------------------------ */}
-        <div className="py-10 border-b border-[#1a1a1a]">
+        <div className="py-10 border-b border-brand-border/50">
           <div className="mb-8">
-            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest mb-2">
+            <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest mb-2">
               Learning Tracks
             </p>
-            <p className="text-sm text-[#4a4a4a] leading-relaxed">
+            <p className="text-sm text-brand-subtle leading-relaxed">
               Structured sequences covering a full clinical domain. Complete a track to demonstrate
               competency across a specialty — not just individual topics.
             </p>
@@ -209,11 +209,11 @@ export default function LearnPage() {
             {LEARNING_TRACKS.map((track) => (
               <div
                 key={track.id}
-                className="group relative bg-[#111111] border border-[#1e1e1e] rounded-2xl px-5 py-5 flex flex-col gap-3"
+                className="group relative bg-brand-surface/70 border border-brand-border/50 rounded-2xl px-5 py-5 flex flex-col gap-3"
               >
                 {/* Lock indicator */}
                 <div className="absolute top-4 right-4">
-                  <div className="w-4 h-4 text-[#2a2a2a]">
+                  <div className="w-4 h-4 text-brand-border">
                     <svg viewBox="0 0 16 16" fill="currentColor">
                       <path d="M11 7V5a3 3 0 0 0-6 0v2H4v7h8V7h-1zm-5-2a2 2 0 0 1 4 0v2H6V5z" />
                     </svg>
@@ -221,22 +221,22 @@ export default function LearnPage() {
                 </div>
 
                 <div className="pr-6">
-                  <p className="text-sm font-semibold text-[#6b6b6b] leading-snug mb-1">
+                  <p className="text-sm font-semibold text-brand-muted leading-snug mb-1">
                     {track.title}
                   </p>
-                  <p className="text-xs text-[#3a3a3a] leading-relaxed">
+                  <p className="text-xs text-brand-subtle leading-relaxed">
                     {track.description}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3 text-xs text-[#3a3a3a]">
+                <div className="flex items-center gap-3 text-xs text-brand-subtle">
                   <span>{track.lessons} lessons</span>
-                  <span className="w-px h-3 bg-[#2a2a2a]" />
+                  <span className="w-px h-3 bg-brand-border" />
                   <span>{track.credits} credits</span>
                 </div>
 
                 <div className="mt-auto pt-1">
-                  <span className="text-xs text-[#2a2a2a] font-medium">Coming soon</span>
+                  <span className="text-xs text-brand-border font-medium">Coming soon</span>
                 </div>
               </div>
             ))}
@@ -246,35 +246,35 @@ export default function LearnPage() {
         {/* ------------------------------------------------------------------ */}
         {/* Today's picks */}
         {/* ------------------------------------------------------------------ */}
-        <div className="py-10 border-b border-[#1a1a1a]">
+        <div className="py-10 border-b border-brand-border/50">
           <div className="flex items-center justify-between mb-6">
-            <p className="text-xs font-semibold text-[#6b6b6b] uppercase tracking-widest">
+            <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest">
               Recommended for you
             </p>
-            <p className="text-xs text-[#3a3a3a]">Based on search history</p>
+            <p className="text-xs text-brand-subtle">Based on search history</p>
           </div>
 
           <div className="space-y-2">
             {MOCK_LESSONS.map((lesson) => (
               <div
                 key={lesson.id}
-                className="flex items-start justify-between gap-4 bg-[#111111] border border-[#1e1e1e] rounded-2xl px-5 py-4"
+                className="flex items-start justify-between gap-4 bg-brand-surface/70 border border-brand-border/50 rounded-2xl px-5 py-4"
               >
                 <div className="min-w-0">
-                  <p className="text-sm text-[#6b6b6b] font-medium leading-snug mb-1">
+                  <p className="text-sm text-brand-muted font-medium leading-snug mb-1">
                     {lesson.title}
                   </p>
-                  <div className="flex items-center gap-3 text-xs text-[#3a3a3a]">
+                  <div className="flex items-center gap-3 text-xs text-brand-subtle">
                     <span>{lesson.questions} questions</span>
-                    <span className="w-px h-3 bg-[#2a2a2a]" />
+                    <span className="w-px h-3 bg-brand-border" />
                     <span>{lesson.minutesEst} min</span>
-                    <span className="w-px h-3 bg-[#2a2a2a]" />
+                    <span className="w-px h-3 bg-brand-border" />
                     <span>{lesson.reason}</span>
                   </div>
                 </div>
                 <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                  <span className="text-xs text-teal-500/60">+{lesson.xpReward} XP</span>
-                  <span className="text-xs text-[#2a2a2a] font-medium">Coming soon</span>
+                  <span className="text-xs text-brand-accent/70">+{lesson.xpReward} XP</span>
+                  <span className="text-xs text-brand-border font-medium">Coming soon</span>
                 </div>
               </div>
             ))}
@@ -285,7 +285,7 @@ export default function LearnPage() {
         {/* Accreditation note */}
         {/* ------------------------------------------------------------------ */}
         <div className="pt-10">
-          <p className="text-xs text-[#3a3a3a] leading-relaxed max-w-lg">
+          <p className="text-xs text-brand-subtle leading-relaxed max-w-lg">
             Credits shown here track your learning progress within Qwiva.
             Formal CME accreditation from the Kenya Medical Practitioners and Dentists Council
             is being pursued — until complete, credits are for personal progress tracking only

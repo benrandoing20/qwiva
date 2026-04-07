@@ -3,6 +3,8 @@
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import BrandLogo from '@/components/BrandLogo'
+import ThemeToggle from '@/components/ThemeToggle'
 
 type Mode = 'login' | 'signup'
 
@@ -35,16 +37,21 @@ export default function AuthPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0f0f0f] flex flex-col items-center justify-center px-4">
+    <main className="relative min-h-screen bg-brand-bg flex flex-col items-center justify-center px-4">
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm">
         {/* Brand */}
         <div className="text-center mb-10">
-          <h1 className="text-3xl font-bold text-white tracking-tight">Qwiva</h1>
-          <p className="text-sm text-[#6b6b6b] mt-2">Kenya's clinical knowledge platform</p>
+          <div className="flex justify-center mb-4">
+            <BrandLogo width={180} height={64} className="h-14 w-auto" priority />
+          </div>
+          <p className="text-sm text-brand-muted">Kenya&apos;s clinical knowledge platform</p>
         </div>
 
         {/* Mode toggle */}
-        <div className="flex mb-6 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1">
+        <div className="flex mb-6 bg-brand-surface border border-brand-border rounded-xl p-1">
           {(['login', 'signup'] as Mode[]).map((m) => (
             <button
               key={m}
@@ -52,8 +59,8 @@ export default function AuthPage() {
               onClick={() => { setMode(m); setError(null); setSuccess(null) }}
               className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
                 mode === m
-                  ? 'bg-[#2a2a2a] text-white'
-                  : 'text-[#6b6b6b] hover:text-[#9a9a9a]'
+                  ? 'bg-brand-raised text-brand-text border border-brand-border/50'
+                  : 'text-brand-muted hover:text-brand-text/90'
               }`}
             >
               {m === 'login' ? 'Sign in' : 'Create account'}
@@ -63,10 +70,10 @@ export default function AuthPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-6 py-7 space-y-4"
+          className="bg-brand-surface border border-brand-border rounded-2xl px-6 py-7 space-y-4"
         >
           <div>
-            <label className="block text-xs font-medium text-[#9a9a9a] mb-1.5 uppercase tracking-wide">
+            <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
               Email
             </label>
             <input
@@ -74,12 +81,12 @@ export default function AuthPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-sm text-[#e8e8e8] placeholder-[#4a4a4a] outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20 transition-all"
+              className="w-full px-3 py-2.5 bg-brand-bg border border-brand-border rounded-lg text-sm text-brand-text placeholder-brand-subtle outline-none focus:border-brand-accent/45 focus:ring-1 focus:ring-brand-accent/15 transition-all"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#9a9a9a] mb-1.5 uppercase tracking-wide">
+            <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
               Password
             </label>
             <input
@@ -88,7 +95,7 @@ export default function AuthPage() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-sm text-[#e8e8e8] placeholder-[#4a4a4a] outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20 transition-all"
+              className="w-full px-3 py-2.5 bg-brand-bg border border-brand-border rounded-lg text-sm text-brand-text placeholder-brand-subtle outline-none focus:border-brand-accent/45 focus:ring-1 focus:ring-brand-accent/15 transition-all"
             />
           </div>
 
@@ -98,7 +105,7 @@ export default function AuthPage() {
             </p>
           )}
           {success && (
-            <p className="text-xs text-teal-400 bg-teal-500/10 border border-teal-500/20 px-3 py-2 rounded-lg">
+            <p className="text-xs text-brand-accent-hover bg-brand-accent/12 border border-brand-accent/25 px-3 py-2 rounded-lg">
               {success}
             </p>
           )}
@@ -106,7 +113,7 @@ export default function AuthPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 text-sm font-semibold text-white bg-teal-500 hover:bg-teal-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors mt-2"
+            className="w-full py-2.5 text-sm font-semibold text-white bg-brand-accent hover:bg-brand-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors mt-2 shadow-[0_0_28px_-6px_rgba(168,85,247,0.55)]"
           >
             {loading
               ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
