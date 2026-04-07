@@ -18,18 +18,18 @@ export default function SearchBar({ onSearch, isLoading }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="flex items-center gap-2 px-4 py-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl focus-within:border-teal-500/50 focus-within:ring-1 focus-within:ring-teal-500/20 transition-all">
+      <div className="flex items-center gap-2 px-4 py-3 bg-brand-surface border border-brand-border rounded-2xl focus-within:border-brand-accent/45 focus-within:ring-1 focus-within:ring-brand-accent/15 transition-all">
         <input
           ref={inputRef}
           type="text"
           placeholder="Ask a clinical question…"
           disabled={isLoading}
-          className="flex-1 bg-transparent text-[#e8e8e8] placeholder-[#4a4a4a] text-base outline-none disabled:opacity-50"
+          className="flex-1 bg-transparent text-brand-text placeholder-brand-subtle text-base outline-none disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={isLoading}
-          className="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-teal-500 hover:bg-teal-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors"
+          className="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-brand-accent hover:bg-brand-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shadow-[0_0_20px_-4px_rgba(168,85,247,0.5)]"
         >
           {isLoading ? (
             <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

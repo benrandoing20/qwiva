@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import posthog from 'posthog-js'
 import { supabase, getAccessToken } from '@/lib/supabase'
 import { streamSearch, fetchConversations, fetchConversationMessages, deleteConversation } from '@/lib/api'
+import BrandLogo from '@/components/BrandLogo'
 import Navbar from '@/components/Navbar'
 import AnswerCard from '@/components/AnswerCard'
 import ChatInput from '@/components/ChatInput'
@@ -54,15 +55,15 @@ function renumberByAppearance(
 function ThinkingIndicator({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-3 py-4">
-      {/* Pulsing ring around a teal core — Qwiva brand mark */}
+      {/* Pulsing ring — brand accent */}
       <div className="relative w-7 h-7 flex-shrink-0">
-        <div className="absolute inset-0 rounded-full bg-teal-500/10 animate-ping" />
-        <div className="absolute inset-0 rounded-full border border-teal-500/30 animate-pulse" />
-        <div className="absolute inset-[5px] rounded-full bg-teal-500 opacity-90"
+        <div className="absolute inset-0 rounded-full bg-brand-pink/20 animate-ping" />
+        <div className="absolute inset-0 rounded-full border border-brand-accent/40 animate-pulse" />
+        <div className="absolute inset-[5px] rounded-full bg-brand-accent opacity-90"
           style={{ animation: 'qwivaPulse 1.8s ease-in-out infinite' }}
         />
       </div>
-      <span className="text-sm text-[#6b6b6b] tracking-wide">{message}</span>
+      <span className="text-sm text-brand-muted tracking-wide">{message}</span>
 
       <style>{`
         @keyframes qwivaPulse {
@@ -297,6 +298,9 @@ export default function HomePage() {
         if (event.event === 'conversation') {
           realConversationId = event.data.conversation_id
           realUserMessageId = event.data.user_message_id
+          // Eagerly sync the ref so the `done` toast check sees the correct
+          // conversation ID before the useEffect render cycle has run.
+          activeConversationIdRef.current = realConversationId
           setActiveConversationId(realConversationId)
           setMessages((prev) =>
             prev.map((m) =>
@@ -427,7 +431,7 @@ export default function HomePage() {
   const showHero = !hasMessages && !activeConversationId && !isLoadingConversation
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f0f0f]">
+    <div className="flex flex-col h-screen bg-brand-bg">
       <Navbar onToggleSidebar={() => setSidebarOpen(v => !v)} />
 
       {/* Below navbar: sidebar + chat area */}
@@ -453,7 +457,7 @@ export default function HomePage() {
                 <p className="text-sm text-red-400">{conversationError}</p>
                 <button
                   onClick={() => activeConversationId && handleSelectConversation(activeConversationId)}
-                  className="px-4 py-2 text-xs text-teal-400 border border-teal-500/30 rounded-full hover:border-teal-500/60 transition-all"
+                  className="px-4 py-2 text-xs text-brand-accent-hover border border-brand-accent/35 rounded-full hover:border-brand-accent/55 transition-all"
                 >
                   Retry
                 </button>
@@ -462,8 +466,10 @@ export default function HomePage() {
               /* Empty / hero state */
               <div className="flex flex-col items-center justify-center h-full px-4 pb-24">
                 <div className="text-center mb-10">
-                  <h1 className="text-4xl font-bold text-white tracking-tight mb-3">Qwiva</h1>
-                  <p className="text-[#6b6b6b] text-base">
+                  <div className="flex justify-center mb-4">
+                    <BrandLogo width={200} height={72} className="h-16 w-auto" priority />
+                  </div>
+                  <p className="text-brand-muted text-base">
                     Kenya&apos;s clinical knowledge platform
                   </p>
                 </div>
@@ -473,7 +479,7 @@ export default function HomePage() {
                       key={q}
                       onClick={() => handleSearch(q)}
                       disabled={isLoading}
-                      className="px-3.5 py-1.5 text-xs text-[#9a9a9a] bg-[#1a1a1a] border border-[#2a2a2a] rounded-full hover:border-teal-500/40 hover:text-teal-400 transition-all disabled:opacity-50"
+                      className="px-3.5 py-1.5 text-xs text-brand-muted bg-brand-surface border border-brand-border rounded-full hover:border-brand-accent/35 hover:text-brand-accent-hover transition-all disabled:opacity-50"
                     >
                       {q}
                     </button>
@@ -509,7 +515,7 @@ export default function HomePage() {
           </div>
 
           {/* Fixed input at bottom */}
-          <div className="border-t border-[#1a1a1a] bg-[#0f0f0f] px-4 py-4">
+          <div className="bg-brand-bg px-4 py-4">
             <div className="max-w-3xl mx-auto w-full">
               <ChatInput
                 value={inputValue}
@@ -556,21 +562,21 @@ function BackgroundDoneToast({
   onDismiss: (id: string) => void
 }) {
   return (
-    <div className="flex items-center gap-2.5 bg-[#1a1a1a] border border-teal-500/30 rounded-xl px-3.5 py-2.5 shadow-xl max-w-xs">
-      <div className="w-2 h-2 rounded-full bg-teal-500 flex-shrink-0" />
+    <div className="flex items-center gap-2.5 bg-brand-surface border border-brand-accent/30 rounded-xl px-3.5 py-2.5 shadow-xl max-w-xs">
+      <div className="w-2 h-2 rounded-full bg-brand-accent flex-shrink-0 shadow-[0_0_8px_rgba(168,85,247,0.7)]" />
       <div className="flex-1 min-w-0">
-        <p className="text-[11px] text-[#6b6b6b] mb-0.5">Answer ready</p>
-        <p className="text-xs text-[#e8e8e8] truncate">{item.title}</p>
+        <p className="text-[11px] text-brand-muted mb-0.5">Answer ready</p>
+        <p className="text-xs text-brand-text truncate">{item.title}</p>
       </div>
       <button
         onClick={() => onNavigate(item.conversationId)}
-        className="text-xs text-teal-400 hover:text-teal-300 transition-colors flex-shrink-0"
+        className="text-xs text-brand-accent-hover hover:text-brand-pink transition-colors flex-shrink-0"
       >
         View →
       </button>
       <button
         onClick={() => onDismiss(item.conversationId)}
-        className="text-[#4a4a4a] hover:text-[#9a9a9a] transition-colors flex-shrink-0 ml-0.5"
+        className="text-brand-subtle hover:text-brand-muted transition-colors flex-shrink-0 ml-0.5"
         aria-label="Dismiss"
       >
         ×
@@ -586,7 +592,7 @@ function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: 
   if (message.role === 'user') {
     return (
       <div className={`flex justify-end${message.stableKey ? ' animate-fadeIn' : ''}`}>
-        <div className="max-w-[80%] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 text-sm text-[#e8e8e8] leading-relaxed whitespace-pre-wrap">
+        <div className="max-w-[80%] bg-brand-surface border border-brand-border rounded-2xl px-4 py-3 text-sm text-brand-text leading-relaxed whitespace-pre-wrap">
           {message.content}
         </div>
       </div>
