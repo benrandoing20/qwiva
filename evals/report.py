@@ -85,7 +85,26 @@ def _render_markdown(report: dict) -> str:
         f"- Source coverage rate: **{cli['source_coverage_rate'] * 100:.1f}%**",
         f"- Avg answer length: **{cli['answer_length_avg_words']} words**",
         f"- Empty answer rate: **{cli['empty_answer_rate'] * 100:.1f}%**",
+        f"- Numeric accuracy rate: **{cli.get('numeric_accuracy_rate', 0) * 100:.1f}%**",
+        f"- Retrieval diversity: **{cli.get('retrieval_diversity_avg', 0):.3f}**",
     ]
+
+    by_diff = cli.get("by_difficulty") or {}
+    if by_diff:
+        lines += [
+            "\n## Clinical Quality by Difficulty",
+            "| Difficulty | n | Citation % | Source Coverage % | Numeric Accuracy % |",
+            "|---|---|---|---|---|",
+        ]
+        labels = {1: "Easy", 2: "Medium", 3: "Hard"}
+        for d in sorted(by_diff):
+            b = by_diff[d]
+            lines.append(
+                f"| {labels.get(d, d)} | {b['n']} "
+                f"| {b['citation_present_rate'] * 100:.1f}% "
+                f"| {b['source_coverage_rate'] * 100:.1f}% "
+                f"| {b['numeric_accuracy_rate'] * 100:.1f}% |"
+            )
 
     if rag.get("n_evaluated", 0) > 0:
         lines += [
@@ -106,3 +125,55 @@ def _render_markdown(report: dict) -> str:
         ]
 
     return "\n".join(lines)
+
+
+def compare_reports(path_a: str, path_b: str) -> None:
+    """Print a delta table between two eval reports."""
+    a = json.loads(pathlib.Path(path_a).read_text())
+    b = json.loads(pathlib.Path(path_b).read_text())
+
+    print(f"\nComparing reports:")
+    print(f"  A: {a['run_id']} ({a['n_questions']}q, {a['n_errors']} errors)")
+    print(f"  B: {b['run_id']} ({b['n_questions']}q, {b['n_errors']} errors)")
+    print()
+
+    # Metrics where lower is better (latency, hallucination, empty answers)
+    lower_is_better = {
+        "embed_p50", "embed_p95", "retrieval_p50", "retrieval_p95",
+        "rerank_p50", "rerank_p95", "ttft_p50", "ttft_p95",
+        "total_p50", "total_p95", "classify_p50", "classify_p95",
+        "empty_answer_rate", "hallucination_score",
+    }
+
+    rows = []
+
+    def _collect(section_key: str, label_prefix: str, d: dict) -> None:
+        ma = (a["metrics"].get(section_key) or {})
+        mb = (b["metrics"].get(section_key) or {})
+        for k, va in ma.items():
+            if not isinstance(va, (int, float)):
+                continue
+            vb = mb.get(k)
+            if vb is None or not isinstance(vb, (int, float)):
+                continue
+            delta = vb - va
+            lib = k in lower_is_better
+            if abs(delta) < 1e-6:
+                arrow = "  "
+            elif (delta < 0) == lib:
+                arrow = "↑"  # improvement
+            else:
+                arrow = "↓"  # regression
+            rows.append((f"{label_prefix}.{k}", va, vb, delta, arrow))
+
+    _collect("latency_ms", "latency", {})
+    _collect("clinical", "clinical", {})
+    _collect("ragas", "ragas", {})
+    _collect("deepeval", "deepeval", {})
+
+    col_w = max(len(r[0]) for r in rows) + 2
+    print(f"{'Metric':<{col_w}} {'A':>10} {'B':>10} {'Δ':>10}  Dir")
+    print("-" * (col_w + 36))
+    for name, va, vb, delta, arrow in rows:
+        print(f"{name:<{col_w}} {va:>10.4g} {vb:>10.4g} {delta:>+10.4g}  {arrow}")
+    print()

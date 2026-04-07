@@ -126,7 +126,20 @@ async def main(args: argparse.Namespace) -> None:
     print("\nCLINICAL QUALITY")
     print(f"  Citation present:  {clinical.citation_present_rate * 100:.1f}%")
     print(f"  Source coverage:   {clinical.source_coverage_rate * 100:.1f}%")
+    print(f"  Numeric accuracy:  {clinical.numeric_accuracy_rate * 100:.1f}%")
+    print(f"  Retrieval diversity: {clinical.retrieval_diversity_avg:.3f}")
     print(f"  Avg answer words:  {clinical.answer_length_avg_words}")
+    if clinical.by_difficulty:
+        print("\nBY DIFFICULTY")
+        labels = {1: "Easy  ", 2: "Medium", 3: "Hard  "}
+        for d in sorted(clinical.by_difficulty):
+            b = clinical.by_difficulty[d]
+            print(
+                f"  {labels.get(d, d)} (n={b['n']:3d})  "
+                f"citation={b['citation_present_rate']*100:.0f}%  "
+                f"coverage={b['source_coverage_rate']*100:.0f}%  "
+                f"numeric={b['numeric_accuracy_rate']*100:.0f}%"
+            )
     if ragas_report and ragas_report.n_evaluated > 0:
         print("\nRAGAS")
         print(f"  Faithfulness:      {ragas_report.faithfulness}")
@@ -151,5 +164,12 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", default="evals/datasets/clinical_questions.json")
     parser.add_argument("--delay", type=float, default=2.0,
                         help="Seconds between questions (default 2.0 — avoids Groq 30 req/min limit)")
+    parser.add_argument("--compare", nargs=2, metavar=("REPORT_A", "REPORT_B"),
+                        help="Compare two report JSONs and print a delta table")
     args = parser.parse_args()
-    asyncio.run(main(args))
+
+    if args.compare:
+        from evals.report import compare_reports
+        compare_reports(*args.compare)
+    else:
+        asyncio.run(main(args))
