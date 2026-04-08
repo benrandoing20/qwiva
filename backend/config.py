@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # Feature flags
     enable_drug_retrieval: bool = True    # include drug label chunks in FTS + Qdrant search
-    enable_version_filter: bool = True    # restrict Qdrant search to is_current_version=True
+    enable_version_filter: bool = False   # only enable after migration adds is_current_version to Qdrant payload
 
     # Deployment
     frontend_url: str = "http://localhost:3000"
