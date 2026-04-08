@@ -1,0 +1,24 @@
+{
+  "guidelines": [
+    {
+      "guideline_id": "kcg-2016",
+      "guideline_version": "2016",
+      "title": "Kenya Clinical Guidelines 2016",
+      "issuing_body": "Kenya Ministry of Health",
+      "pub_year": 2016,
+      "geography": "Kenya",
+      "document_type": "national_guideline",
+      "evidence_tier": 1,
+      "path": "docs/kenya_clinical_guidelines_2016.pdf",
+      "source_url": "",
+      "licence": ""
+    }
+  ],
+  "drugs": [
+    {
+      "inn": "amoxicillin",
+      "sources": ["fda", "emc"],
+      "brand_name": "Amoxil"
+    }
+  ]
+}
