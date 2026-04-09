@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState, useEffect } from 'react'
+import { FormEvent, useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import BrandLogo from '@/components/BrandLogo'
@@ -8,7 +8,8 @@ import ThemeToggle from '@/components/ThemeToggle'
 
 type Mode = 'login' | 'signup'
 
-export default function AuthPage() {
+// Isolated because useSearchParams() requires a Suspense boundary in Next.js 14
+function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<Mode>('login')
@@ -134,5 +135,13 @@ export default function AuthPage() {
         </form>
       </div>
     </main>
+  )
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   )
 }
