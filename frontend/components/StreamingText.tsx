@@ -87,7 +87,7 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
                 {/* Inline pill */}
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-brand-accent-hover bg-brand-accent/12 border border-brand-accent/25 rounded cursor-default select-none hover:bg-brand-accent/22 transition-colors leading-none">
                   <span className="opacity-60">{n}</span>
-                  <span className="max-w-[72px] truncate">{label}</span>
+                  <span className="max-w-[120px] truncate">{label}</span>
                 </span>
 
                 {/* Hover tooltip — pure CSS, no JS state */}
