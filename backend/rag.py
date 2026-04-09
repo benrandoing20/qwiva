@@ -444,7 +444,7 @@ class QwivaRAG:
                 db.table(s.drug_chunk_table)
                 .select(
                     "id, content, medicine_name, inn, atc_code, section_key, section_title, "
-                    "clinical_priority, chunk_index, source_url, source_type"
+                    "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
                 )
                 .filter("fts", "wfts", query)
                 .limit(max(1, s.retrieval_top_k // 2))
@@ -938,18 +938,19 @@ def _guideline_row_to_chunk(row: dict) -> Chunk:
 def _drug_row_to_chunk(row: dict) -> Chunk:
     """Maps a drug chunk table row to Chunk."""
     med_name = row.get("medicine_name", "") or row.get("inn", "")
-    source_type = row.get("source_type", "")  # "fda" | "emc"
-    label = f"{med_name} prescribing information ({source_type.upper()})" if source_type else f"{med_name} prescribing information"
+    # `source` holds the meaningful value (e.g. "fda_spl"); source_type is always "drug_label"
+    source = row.get("source", row.get("source_type", ""))
+    label = f"{med_name} prescribing information ({source.upper()})" if source else f"{med_name} prescribing information"
     return Chunk(
         id=str(row["id"]),
         content=row.get("content", ""),
         doc_type="drug",
         guideline_title=label,
         cascading_path=row.get("section_title", "") or row.get("section_key", ""),
-        year="",
-        publisher=source_type.upper() if source_type else "Drug Label",
+        year=str(row.get("last_updated", "") or ""),
+        publisher=source.upper() if source else "Drug Label",
         chunk_index=int(row.get("chunk_index", 0)),
-        source_url=row.get("source_url", "") or row.get("fda_url", "") or row.get("emc_url", ""),
+        source_url=row.get("fda_url", "") or row.get("emc_url", "") or row.get("source_url", ""),
         medicine_name=row.get("medicine_name", ""),
         inn=row.get("inn", ""),
         atc_code=row.get("atc_code", ""),

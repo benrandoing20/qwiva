@@ -129,7 +129,7 @@ async def migrate(dry_run: bool, batch_size: int, inn_filter: str | None) -> Non
         log.info("Columns: %s", list((sample.data or [{}])[0].keys()))
         for row in (sample.data or []):
             med = row.get("medicine_name") or row.get("inn", "?")
-            src = row.get("source_type", "?")
+            src = row.get("source", row.get("source_type", "?"))
             section = row.get("section_key") or row.get("section_title", "?")
             has_embed = _parse_embedding(row.get("embedding")) is not None
             log.info("  [DRY RUN] %s / %s / section=%s / has_embedding=%s", med, src, section, has_embed)
@@ -202,10 +202,12 @@ async def migrate(dry_run: bool, batch_size: int, inn_filter: str | None) -> Non
                 continue
 
             med_name = row.get("medicine_name", "") or row.get("inn", "")
-            source_type = row.get("source_type", "")
+            # Use `source` (e.g. "fda_spl") for human-readable label;
+            # source_type is always "drug_label" in this dataset
+            source = row.get("source", row.get("source_type", ""))
             label = (
-                f"{med_name} prescribing information ({source_type.upper()})"
-                if source_type else f"{med_name} prescribing information"
+                f"{med_name} prescribing information ({source.upper()})"
+                if source else f"{med_name} prescribing information"
             )
 
             points.append(
@@ -226,12 +228,12 @@ async def migrate(dry_run: bool, batch_size: int, inn_filter: str | None) -> Non
                         "section_key": row.get("section_key", ""),
                         "section_title": row.get("section_title", ""),
                         "clinical_priority": row.get("clinical_priority", ""),
-                        "source_type": source_type,
-                        "source_url": row.get("source_url", ""),
+                        "source_type": source,
+                        "source_url": row.get("fda_url", "") or row.get("emc_url", "") or row.get("source_url", ""),
                         # Reuse guideline fields expected by rag.py
                         "cascading_path": row.get("section_title", ""),
-                        "year": str(row.get("pub_year", "") or ""),
-                        "publisher": source_type.upper() if source_type else "Drug Label",
+                        "year": str(row.get("last_updated", "") or ""),
+                        "publisher": source.upper() if source else "Drug Label",
                         "evidence_tier": 0,
                     },
                 )
