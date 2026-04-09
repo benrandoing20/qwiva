@@ -119,6 +119,17 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
                         </span>
                       </>
                     )}
+                    {citation.source_url && (
+                      <a
+                        href={citation.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] text-brand-accent hover:text-brand-accent-hover transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View source ↗
+                      </a>
+                    )}
                   </span>
                 </span>
               </span>

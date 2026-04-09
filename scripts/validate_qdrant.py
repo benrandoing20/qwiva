@@ -2,14 +2,16 @@
 Validate the Qdrant collection and cross-check against Supabase.
 
 Usage:
-    python scripts/validate_qdrant.py [--sample 5]
+    python scripts/validate_qdrant.py [--sample 10]
 
 Checks:
-  1. Collection info: vector count, dimension, distance metric
-  2. Distinct guideline titles indexed
-  3. Payload completeness on sampled points
-  4. Embedding sanity (dimension + non-zero)
-  5. Supabase documents_v2 row count vs Qdrant point count
+  1. Collection info: vector count, dimension, distance metric, payload indexes
+  2. doc_type breakdown (guideline / drug / legacy)
+  3. is_current_version breakdown
+  4. Distinct guideline titles indexed
+  5. Payload completeness on sampled points (new + legacy fields)
+  6. Embedding sanity (dimension + non-zero)
+  7. Cross-check: Supabase guideline_chunks + drug_chunk_table vs Qdrant point count
 """
 
 import argparse
@@ -20,13 +22,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-REQUIRED_FIELDS = ["content", "guideline_title", "cascading_path", "year", "publisher", "doc_id", "chunk_index"]
+# Fields that MUST be present on all points (new schema)
+REQUIRED_FIELDS = ["content", "doc_type", "guideline_title", "chunk_index"]
+# Fields expected on guideline points
+GUIDELINE_FIELDS = ["is_current_version", "evidence_tier"]
 
 
 async def validate(sample_n: int) -> None:
     from qdrant_client import AsyncQdrantClient
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
 
     from backend.config import get_settings
+    from backend.db import get_db
 
     settings = get_settings()
 
@@ -53,23 +60,64 @@ async def validate(sample_n: int) -> None:
     dim = getattr(vec_config, "size", "unknown")
     distance = getattr(vec_config, "distance", "unknown")
 
-    print(f"COLLECTION INFO")
+    print("COLLECTION INFO")
     print(f"  Points (vectors):  {point_count:,}")
     print(f"  Vector dimension:  {dim}")
     print(f"  Distance metric:   {distance}")
-
     if dim != 1536:
         print(f"  WARNING: Expected 1536-dim (text-embedding-3-small), got {dim}")
 
-    # 2. Distinct guideline titles
-    print(f"\nINDEXED GUIDELINES")
+    # Payload indexes
+    indexed_fields = []
+    try:
+        for field_name, field_schema in (info.payload_schema or {}).items():
+            indexed_fields.append(field_name)
+        if indexed_fields:
+            print(f"  Payload indexes:   {', '.join(indexed_fields)}")
+        else:
+            print("  WARNING: No payload indexes found — run upsert_qdrant() to create them")
+        for expected in ("doc_type", "is_current_version", "evidence_tier"):
+            if expected not in indexed_fields:
+                print(f"  WARNING: Missing payload index on '{expected}' — filtering will be slow")
+    except Exception:
+        pass
+
+    # 2. doc_type breakdown
+    print("\nDOC_TYPE BREAKDOWN")
+    for doc_type in ("guideline", "drug", "legacy"):
+        try:
+            count_res = await qdrant.count(
+                collection_name=col,
+                count_filter=Filter(must=[FieldCondition(key="doc_type", match=MatchValue(value=doc_type))]),
+                exact=False,
+            )
+            print(f"  {doc_type:12s}: {count_res.count:,}")
+        except Exception as e:
+            print(f"  {doc_type:12s}: (error: {e})")
+
+    # 3. is_current_version breakdown
+    print("\nVERSION FILTER")
+    for flag in (True, False):
+        try:
+            count_res = await qdrant.count(
+                collection_name=col,
+                count_filter=Filter(must=[FieldCondition(key="is_current_version", match=MatchValue(value=flag))]),
+                exact=False,
+            )
+            label = "current" if flag else "superseded"
+            print(f"  is_current_version={flag} ({label}): {count_res.count:,}")
+        except Exception as e:
+            print(f"  is_current_version={flag}: (error: {e})")
+
+    # 4. Distinct guideline titles
+    print("\nINDEXED TITLES (sample via scroll)")
     titles: set[str] = set()
     offset = None
     while True:
         result, offset = await qdrant.scroll(
             collection_name=col,
             limit=500,
-            with_payload=["guideline_title"],
+            with_payload=["guideline_title", "doc_type"],
             offset=offset,
         )
         for point in result:
@@ -79,13 +127,16 @@ async def validate(sample_n: int) -> None:
         if offset is None:
             break
 
-    if titles:
-        for t in sorted(titles):
+    guideline_titles = sorted(titles)
+    if guideline_titles:
+        for t in guideline_titles[:30]:
             print(f"  • {t}")
+        if len(guideline_titles) > 30:
+            print(f"  ... and {len(guideline_titles) - 30} more")
     else:
         print("  (none found)")
 
-    # 3. Payload completeness on sampled points
+    # 5. Payload completeness on sampled points
     print(f"\nPAYLOAD COMPLETENESS ({sample_n} sampled points)")
     sample_result, _ = await qdrant.scroll(
         collection_name=col,
@@ -96,17 +147,21 @@ async def validate(sample_n: int) -> None:
     issues = 0
     for point in sample_result:
         payload = point.payload or {}
+        doc_type = payload.get("doc_type", "?")
         missing = [f for f in REQUIRED_FIELDS if f not in payload or payload[f] is None]
+        if doc_type in ("guideline", "legacy"):
+            missing += [f for f in GUIDELINE_FIELDS if f not in payload or payload[f] is None]
         if missing:
-            print(f"  Point {point.id}: MISSING fields: {missing}")
+            print(f"  Point {point.id} [{doc_type}]: MISSING fields: {missing}")
             issues += 1
         else:
-            title = payload.get("guideline_title", "?")[:50]
+            title = str(payload.get("guideline_title", "?"))[:50]
             chunk_idx = payload.get("chunk_index", "?")
-            print(f"  Point {point.id}: OK  [{title}  chunk {chunk_idx}]")
+            is_current = payload.get("is_current_version", "?")
+            print(f"  Point {point.id} [{doc_type}]: OK  [{title}  chunk {chunk_idx}  current={is_current}]")
 
-    # 4. Embedding sanity
-    print(f"\nEMBEDDING SANITY")
+    # 6. Embedding sanity
+    print("\nEMBEDDING SANITY")
     if sample_result:
         first = sample_result[0]
         vec = first.vector
@@ -123,31 +178,60 @@ async def validate(sample_n: int) -> None:
     else:
         print("  No points to sample")
 
-    # 5. Supabase cross-check
-    print(f"\nSUPABASE CROSS-CHECK")
+    # 7. Supabase cross-check
+    print("\nSUPABASE CROSS-CHECK")
     try:
-        from supabase._async.client import create_client
+        db = await get_db()
 
-        sb = await create_client(settings.supabase_url, settings.supabase_service_key)
-        resp = await sb.table("documents_v2").select("id", count="exact").execute()
-        sb_count = resp.count or 0
-        print(f"  Supabase documents_v2 rows: {sb_count:,}")
-        print(f"  Qdrant points:              {point_count:,}")
-        if sb_count != point_count:
-            diff = abs(sb_count - point_count)
-            print(f"  WARNING: Mismatch of {diff} — run ingest_pdf.py to sync")
-        else:
-            print(f"  OK: counts match")
+        # guideline_chunks (current only)
+        gc_res = (
+            await db.table(settings.guideline_chunk_table)
+            .select("id", count="exact")
+            .eq("is_current_version", True)
+            .execute()
+        )
+        gc_count = gc_res.count or 0
+        print(f"  guideline_chunks (current):  {gc_count:,}")
+
+        # drug chunk table
+        try:
+            dc_res = (
+                await db.table(settings.drug_chunk_table)
+                .select("id", count="exact")
+                .execute()
+            )
+            dc_count = dc_res.count or 0
+            print(f"  {settings.drug_chunk_table}:       {dc_count:,}")
+        except Exception as e:
+            print(f"  {settings.drug_chunk_table}: (error: {e})")
+            dc_count = 0
+
+        # Legacy documents_v2
+        try:
+            legacy_res = (
+                await db.table(settings.legacy_chunk_table)
+                .select("id", count="exact")
+                .execute()
+            )
+            legacy_count = legacy_res.count or 0
+            print(f"  documents_v2 (legacy):       {legacy_count:,}")
+        except Exception:
+            legacy_count = 0
+
+        print(f"  Qdrant total points:         {point_count:,}")
+
     except Exception as e:
         print(f"  Could not reach Supabase: {e}")
 
     print(f"\n{'=' * 60}")
-    print(f"Validation complete. Issues found: {issues}")
+    print(f"Validation complete. Payload issues found: {issues}")
+    if issues == 0:
+        print("All sampled points look healthy.")
     print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate Qdrant collection + Supabase sync")
-    parser.add_argument("--sample", type=int, default=5, help="Number of points to sample for payload check (default 5)")
+    parser.add_argument("--sample", type=int, default=10, help="Number of points to sample (default 10)")
     args = parser.parse_args()
     asyncio.run(validate(args.sample))

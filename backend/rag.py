@@ -67,6 +67,13 @@ beyond the sources. Never state a drug dose not explicitly present in the \
 retrieved guidelines — if absent, say so and direct the physician to the \
 appropriate formulary.
 
+Drug label information: Some retrieved excerpts come from official drug prescribing \
+information (FDA SPL or EMC). When citing these, label the citation as \
+"[medicine_name] prescribing information (FDA)" or "(EMC)" as appropriate. \
+Drug label doses take precedence over general guideline doses when the label is \
+more specific for the drug in question. Always note Kenya availability and flag \
+if a drug is not on the KEML.
+
 Refer vs manage: For every management query include — even if not asked — \
 (1) what to do now with specific doses where available, \
 (2) when and to whom to refer with exact criteria, \
@@ -147,12 +154,25 @@ as a dedicated clinical question to get a fully cited guideline-grounded respons
 class Chunk:
     id: str
     content: str
+    doc_type: str           # "guideline" | "drug" | "legacy"
     guideline_title: str
     cascading_path: str
     year: str
     publisher: str
     chunk_index: int
     source_url: str = ""
+    # Evidence grading — populated from guideline_chunks schema
+    evidence_tier: int = 0          # 1=national_guideline, 2=systematic_review, 3=rct
+    grade_strength: str = ""        # "Strong", "Conditional", "Best Practice"
+    grade_direction: str = ""       # "for" | "against"
+    chunk_type: str = "text"        # "recommendation" | "text" | "table" | "background"
+    is_current_version: bool = True
+    # Drug label fields — populated from drug chunk table schema
+    medicine_name: str = ""
+    inn: str = ""
+    atc_code: str = ""
+    section_key: str = ""
+    clinical_priority: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -370,25 +390,94 @@ class QwivaRAG:
         ).execute()
         return [_row_to_chunk(r) for r in (response.data or [])]
 
-    async def _qdrant_search(self, embedding: list[float]) -> list[Chunk]:
+    async def _qdrant_search(
+        self, embedding: list[float], doc_type: str | None = None
+    ) -> list[Chunk]:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        conditions = []
+        if self._settings.enable_version_filter:
+            conditions.append(
+                FieldCondition(key="is_current_version", match=MatchValue(value=True))
+            )
+        if doc_type:
+            conditions.append(
+                FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
+            )
+        query_filter = Filter(must=conditions) if conditions else None
+
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
+            query_filter=query_filter,
             limit=self._settings.retrieval_top_k,
             with_payload=True,
         )
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
     async def _fts_search(self, query: str) -> list[Chunk]:
+        """Parallel FTS across guideline_chunks + drug chunk table (+ legacy fallback).
+
+        Each table has its own tsvector fts column. Results are merged before
+        RRF — the reranker ultimately decides cross-type relevance.
+        """
         db = await get_db()
-        response = (
-            await db.table("documents_v2")
-            .select("id, content, metadata")
+        s = self._settings
+
+        # Build coroutines for each active table
+        guideline_coro = (
+            db.table(s.guideline_chunk_table)
+            .select(
+                "id, content, guideline_title, cascading_path, pub_year, issuing_body, "
+                "chunk_index, source_url, evidence_tier, grade_strength, grade_direction, "
+                "chunk_type, is_current_version"
+            )
             .filter("fts", "wfts", query)
-            .limit(self._settings.retrieval_top_k)
+            .eq("is_current_version", True)
+            .limit(s.retrieval_top_k)
             .execute()
         )
-        return [_row_to_chunk(r) for r in (response.data or [])]
+
+        coros = [guideline_coro]
+        if s.enable_drug_retrieval:
+            drug_coro = (
+                db.table(s.drug_chunk_table)
+                .select(
+                    "id, content, medicine_name, inn, atc_code, section_key, section_title, "
+                    "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
+                )
+                .filter("fts", "wfts", query)
+                .limit(max(1, s.retrieval_top_k // 2))
+                .execute()
+            )
+            coros.append(drug_coro)
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
+        chunks: list[Chunk] = []
+
+        # Guideline results
+        guideline_res = results[0]
+        if isinstance(guideline_res, Exception):
+            # New table not yet populated or column missing — fall back to documents_v2
+            legacy_res = await (
+                db.table(s.legacy_chunk_table)
+                .select("id, content, metadata")
+                .filter("fts", "wfts", query)
+                .limit(s.retrieval_top_k)
+                .execute()
+            )
+            chunks += [_row_to_chunk(r) for r in (legacy_res.data or [])]
+        else:
+            chunks += [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
+
+        # Drug results (optional)
+        if s.enable_drug_retrieval and len(results) > 1:
+            drug_res = results[1]
+            if not isinstance(drug_res, Exception):
+                chunks += [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
+
+        return chunks
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
@@ -809,16 +898,65 @@ def _trim_history(
 
 
 def _row_to_chunk(row: dict) -> Chunk:
+    """Legacy: maps a documents_v2 row (JSONB metadata) to Chunk."""
     meta = row.get("metadata") or {}
     return Chunk(
         id=str(row["id"]),
         content=row.get("content", ""),
+        doc_type="legacy",
         guideline_title=meta.get("guideline_title", "Unknown guideline"),
         cascading_path=meta.get("cascading_path", ""),
         year=str(meta.get("year", "")),
         publisher=meta.get("publisher", ""),
         chunk_index=int(meta.get("chunk_index", 0)),
         source_url=meta.get("source_url", "") or meta.get("url", ""),
+        evidence_tier=1,
+        chunk_type="text",
+    )
+
+
+def _guideline_row_to_chunk(row: dict) -> Chunk:
+    """Maps a guideline_chunks row to Chunk."""
+    return Chunk(
+        id=str(row["id"]),
+        content=row.get("content", ""),
+        doc_type="guideline",
+        guideline_title=row.get("guideline_title", "Unknown guideline"),
+        cascading_path=row.get("cascading_path", "") or row.get("chapter_title", ""),
+        year=str(row.get("pub_year", "") or ""),
+        publisher=row.get("issuing_body", "") or row.get("issuing_body_canonical", ""),
+        chunk_index=int(row.get("chunk_index", 0)),
+        source_url=row.get("source_url", "") or row.get("iris_url", ""),
+        evidence_tier=int(row.get("evidence_tier") or 1),
+        grade_strength=row.get("grade_strength", ""),
+        grade_direction=row.get("grade_direction", ""),
+        chunk_type=row.get("chunk_type", "text"),
+        is_current_version=bool(row.get("is_current_version", True)),
+    )
+
+
+def _drug_row_to_chunk(row: dict) -> Chunk:
+    """Maps a drug chunk table row to Chunk."""
+    med_name = row.get("medicine_name", "") or row.get("inn", "")
+    # `source` holds the meaningful value (e.g. "fda_spl"); source_type is always "drug_label"
+    source = row.get("source", row.get("source_type", ""))
+    label = f"{med_name} prescribing information ({source.upper()})" if source else f"{med_name} prescribing information"
+    return Chunk(
+        id=str(row["id"]),
+        content=row.get("content", ""),
+        doc_type="drug",
+        guideline_title=label,
+        cascading_path=row.get("section_title", "") or row.get("section_key", ""),
+        year=str(row.get("last_updated", "") or ""),
+        publisher=source.upper() if source else "Drug Label",
+        chunk_index=int(row.get("chunk_index", 0)),
+        source_url=row.get("fda_url", "") or row.get("emc_url", "") or row.get("source_url", ""),
+        medicine_name=row.get("medicine_name", ""),
+        inn=row.get("inn", ""),
+        atc_code=row.get("atc_code", ""),
+        section_key=row.get("section_key", ""),
+        clinical_priority=row.get("clinical_priority", ""),
+        chunk_type="drug_label",
     )
 
 
@@ -829,24 +967,31 @@ _EXCERPT_CHARS = 400  # chars of chunk content stored per citation for follow-up
 def _build_citations(chunks: list[Chunk]) -> list[Citation]:
     """
     Build deduplicated citations from reranked chunks.
-    Multiple chunks from the same guideline collapse into one citation entry.
-    The LLM prompt is also built with these deduplicated numbers, so [1][2]
-    in the answer text always matches what the UI displays.
+    Multiple chunks from the same source collapse into one citation entry.
+    Dedup key is (doc_type, normalised title) to prevent a drug label and a
+    guideline with a similar name from merging incorrectly.
     The leading excerpt of the first (highest-ranked) chunk is stored so
     follow-up questions can reference what was actually retrieved.
     """
-    seen: dict[str, int] = {}  # guideline_title -> assigned index
+    seen: dict[tuple[str, str], int] = {}
     citations: list[Citation] = []
     idx = 1
 
     for chunk in chunks:
-        key = (chunk.guideline_title or "").strip().lower()
+        title = (chunk.guideline_title or chunk.medicine_name or "").strip()
+        key = (chunk.doc_type, title.lower())
         if key not in seen:
             seen[key] = idx
+            # For drug chunks, use section_title as the section label
+            section = (
+                chunk.cascading_path
+                if chunk.doc_type != "drug"
+                else (chunk.section_key or chunk.cascading_path)
+            )
             citations.append(Citation(
                 index=idx,
-                guideline_title=chunk.guideline_title,
-                section=chunk.cascading_path,
+                guideline_title=title,
+                section=section,
                 year=chunk.year,
                 publisher=chunk.publisher,
                 excerpt=chunk.content[:_EXCERPT_CHARS],
@@ -859,15 +1004,23 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
 
 
 def _derive_evidence_grade(chunks: list[Chunk]) -> str:
-    """
-    Derives a simple evidence label from the source guidelines.
-    All answers are grounded in clinical guidelines — no ACC/AHA class inference.
-    Returns the top publisher if available, otherwise a generic label.
+    """Derives an evidence label from the richest available chunk metadata.
+
+    Priority: structured grade fields > evidence_tier number > publisher name.
     """
     if not chunks:
         return "Clinical Guideline"
-    top_publisher = chunks[0].publisher
-    return f"Clinical Guideline · {top_publisher}" if top_publisher else "Clinical Guideline"
+    top = chunks[0]
+    # Use structured grade when available (from guideline_chunks schema)
+    if top.grade_strength and top.grade_direction:
+        base = f"{top.grade_strength} recommendation ({top.grade_direction})"
+        return f"{base} · {top.publisher}" if top.publisher else base
+    # Evidence tier map
+    _tier_labels = {1: "Clinical Guideline", 2: "Systematic Review", 3: "RCT Evidence"}
+    label = _tier_labels.get(top.evidence_tier, "Clinical Reference")
+    if top.doc_type == "drug":
+        label = "Prescribing Information"
+    return f"{label} · {top.publisher}" if top.publisher else label
 
 
 def _sse(event: str, data: dict) -> str:
@@ -957,14 +1110,32 @@ def _rrf_merge(
 
 
 def _qdrant_hit_to_chunk(hit) -> Chunk:
+    """Maps a Qdrant point to Chunk, reading both legacy and new payload fields."""
     p = hit.payload or {}
+    doc_type = p.get("doc_type", "legacy")
+    medicine_name = p.get("medicine_name", "")
+    title = p.get("guideline_title", "") or (
+        f"{medicine_name} prescribing information ({p.get('source_type', '').upper()})"
+        if doc_type == "drug" else "Unknown guideline"
+    )
     return Chunk(
         id=str(hit.id),
         content=p.get("content", ""),
-        guideline_title=p.get("guideline_title", "Unknown guideline"),
-        cascading_path=p.get("cascading_path", ""),
-        year=str(p.get("year", "")),
-        publisher=p.get("publisher", ""),
+        doc_type=doc_type,
+        guideline_title=title,
+        cascading_path=p.get("cascading_path", "") or p.get("chapter_title", "") or p.get("section_title", ""),
+        year=str(p.get("year", "") or p.get("pub_year", "") or ""),
+        publisher=p.get("publisher", "") or p.get("issuing_body", "") or p.get("source_type", "").upper(),
         chunk_index=int(p.get("chunk_index", 0)),
-        source_url=p.get("source_url", "") or p.get("url", ""),
+        source_url=p.get("source_url", "") or p.get("url", "") or p.get("iris_url", ""),
+        evidence_tier=int(p.get("evidence_tier") or 0),
+        grade_strength=p.get("grade_strength", ""),
+        grade_direction=p.get("grade_direction", ""),
+        chunk_type=p.get("chunk_type", "text"),
+        is_current_version=bool(p.get("is_current_version", True)),
+        medicine_name=medicine_name,
+        inn=p.get("inn", ""),
+        atc_code=p.get("atc_code", ""),
+        section_key=p.get("section_key", ""),
+        clinical_priority=p.get("clinical_priority", ""),
     )

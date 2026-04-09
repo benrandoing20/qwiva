@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     qdrant_api_key: str = ""
     qdrant_collection: str = "qwiva_docs"
 
+    # Corpus tables — set these to match your Supabase table names.
+    # guideline_chunk_table: your colleague's new rich guideline table.
+    # drug_chunk_table: the drug label sections table linked to drug_manifest.
+    #   Override via GUIDELINE_CHUNK_TABLE / DRUG_CHUNK_TABLE env vars.
+    guideline_chunk_table: str = "guideline_chunks"
+    drug_chunk_table: str = "drug_label_chunks"  # confirm exact name with colleague
+    legacy_chunk_table: str = "documents_v2"      # deprecated; used during migration window
+
+    # Feature flags
+    enable_drug_retrieval: bool = True    # include drug label chunks in FTS + Qdrant search
+    enable_version_filter: bool = False   # only enable after migration adds is_current_version to Qdrant payload
+
     # Deployment
     frontend_url: str = "http://localhost:3000"
 
