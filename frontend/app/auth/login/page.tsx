@@ -1,7 +1,7 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { FormEvent, useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import BrandLogo from '@/components/BrandLogo'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -10,12 +10,19 @@ type Mode = 'login' | 'signup'
 
 export default function AuthPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (searchParams.get('error') === 'confirmation_failed') {
+      setError('Email confirmation failed. Please try signing up again or contact support.')
+    }
+  }, [searchParams])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -29,7 +36,12 @@ export default function AuthPage() {
       if (authError) { setError(authError.message); return }
       router.push('/')
     } else {
-      const { error: authError } = await supabase.auth.signUp({ email, password })
+      const redirectTo = `${window.location.origin}/auth/callback`
+      const { error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: redirectTo },
+      })
       setLoading(false)
       if (authError) { setError(authError.message); return }
       setSuccess('Check your email to confirm your account, then sign in.')
