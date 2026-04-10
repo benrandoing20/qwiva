@@ -27,6 +27,7 @@ from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+log = logging.getLogger(__name__)
 
 from backend.config import Settings, get_settings
 from backend.db import get_db
@@ -367,9 +368,18 @@ class QwivaRAG:
                 self._qdrant_search(embedding),
                 self._fts_search(query),
             )
-            return _rrf_merge(
+            doc_type_counts = {}
+            for c in vector_chunks:
+                doc_type_counts[c.doc_type] = doc_type_counts.get(c.doc_type, 0) + 1
+            log.info(
+                "Retrieval: Qdrant=%d %s  FTS=%d",
+                len(vector_chunks), doc_type_counts, len(fts_chunks),
+            )
+            merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
+            log.info("After RRF: %d chunks", len(merged))
+            return merged
 
         # Fallback: legacy single Supabase RPC (no Qdrant configured)
         db = await get_db()
@@ -428,9 +438,9 @@ class QwivaRAG:
         guideline_coro = (
             db.table(s.guideline_chunk_table)
             .select(
-                "id, content, guideline_title, cascading_path, pub_year, issuing_body, "
-                "chunk_index, source_url, evidence_tier, grade_strength, grade_direction, "
-                "chunk_type, is_current_version"
+                "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
+                "issuing_body_canonical, chunk_index, source_url, iris_url, evidence_tier, "
+                "grade_strength, grade_direction, chunk_type, is_current_version"
             )
             .filter("fts", "wfts", query)
             .eq("is_current_version", True)
@@ -459,7 +469,7 @@ class QwivaRAG:
         # Guideline results
         guideline_res = results[0]
         if isinstance(guideline_res, Exception):
-            # New table not yet populated or column missing — fall back to documents_v2
+            log.warning("guideline_chunks FTS failed (%s) — falling back to documents_v2", guideline_res)
             legacy_res = await (
                 db.table(s.legacy_chunk_table)
                 .select("id, content, metadata")
@@ -467,21 +477,32 @@ class QwivaRAG:
                 .limit(s.retrieval_top_k)
                 .execute()
             )
-            chunks += [_row_to_chunk(r) for r in (legacy_res.data or [])]
+            g_chunks = [_row_to_chunk(r) for r in (legacy_res.data or [])]
+            log.info("FTS documents_v2 (fallback): %d results", len(g_chunks))
         else:
-            chunks += [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
+            g_chunks = [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
+            log.info("FTS guideline_chunks: %d results", len(g_chunks))
+        chunks += g_chunks
 
         # Drug results (optional)
         if s.enable_drug_retrieval and len(results) > 1:
             drug_res = results[1]
-            if not isinstance(drug_res, Exception):
-                chunks += [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
+            if isinstance(drug_res, Exception):
+                log.warning("drug FTS failed (%s)", drug_res)
+            else:
+                d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
+                log.info("FTS drug_label_chunks: %d results", len(d_chunks))
+                chunks += d_chunks
 
         return chunks
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
             return chunks
+        in_counts: dict[str, int] = {}
+        for c in chunks:
+            in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
+        log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -498,7 +519,12 @@ class QwivaRAG:
         response.raise_for_status()
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
-        return [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
+        kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
+        out_counts: dict[str, int] = {}
+        for c in kept:
+            out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
+        log.info("Rerank output: %d chunks %s", len(kept), out_counts)
+        return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
         embedding = await self._embed(query)
