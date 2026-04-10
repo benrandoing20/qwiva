@@ -55,13 +55,34 @@ async def test(query: str, top_k: int) -> None:
     for c in fts_chunks[:3]:
         print(f"  [{c.doc_type}] {c.guideline_title[:60]} | chunk_index={c.chunk_index}")
 
-    # 4. RRF merge
+    # 4. Drug direct lookup
+    if settings.enable_drug_retrieval:
+        direct_chunks = await rag._drug_direct_lookup(query)
+        d_counts = Counter(c.doc_type for c in direct_chunks)
+        print(f"\nDrug direct lookup ({len(direct_chunks)} chunks): {dict(d_counts)}")
+        for c in direct_chunks[:3]:
+            print(f"  [{c.doc_type}] {c.guideline_title[:60]} | section={c.section_key}")
+    else:
+        direct_chunks = []
+
+    # 5. RRF merge
     from backend.rag import _rrf_merge
     merged = _rrf_merge(qdrant_chunks, fts_chunks, settings.rrf_k, top_k or settings.retrieval_top_k)
+    # Inject direct chunks (same logic as _hybrid_search)
+    seen_ids = {c.id for c in merged}
+    drug_inject_k = max(2, settings.retrieval_top_k // 3)
+    injected = 0
+    for c in direct_chunks:
+        if injected >= drug_inject_k:
+            break
+        if c.id not in seen_ids:
+            merged.append(c)
+            seen_ids.add(c.id)
+            injected += 1
     m_counts = Counter(c.doc_type for c in merged)
-    print(f"\nAfter RRF ({len(merged)} chunks): {dict(m_counts)}")
+    print(f"\nAfter RRF+inject ({len(merged)} chunks, {injected} direct injected): {dict(m_counts)}")
 
-    # 5. Rerank
+    # 6. Rerank
     reranked = await rag._rerank(query, merged)
     r_counts = Counter(c.doc_type for c in reranked)
     print(f"\nAfter Rerank ({len(reranked)} chunks): {dict(r_counts)}")
