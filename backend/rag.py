@@ -27,6 +27,7 @@ from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+log = logging.getLogger(__name__)
 
 from backend.config import Settings, get_settings
 from backend.db import get_db
@@ -363,13 +364,61 @@ class QwivaRAG:
     async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
         """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
         if self._settings.qdrant_url:
-            vector_chunks, fts_chunks = await asyncio.gather(
+            gather_coros: list = [
                 self._qdrant_search(embedding),
                 self._fts_search(query),
+            ]
+            if self._settings.enable_drug_retrieval:
+                gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
+                gather_coros.append(self._drug_direct_lookup(query))
+
+            gather_results = await asyncio.gather(*gather_coros)
+            vector_chunks: list[Chunk] = gather_results[0]
+            fts_chunks: list[Chunk] = gather_results[1]
+            drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
+            drug_direct_chunks: list[Chunk] = gather_results[3] if self._settings.enable_drug_retrieval else []
+
+            doc_type_counts = {}
+            for c in vector_chunks:
+                doc_type_counts[c.doc_type] = doc_type_counts.get(c.doc_type, 0) + 1
+            log.info(
+                "Retrieval: Qdrant=%d %s  FTS=%d  DrugQdrant=%d  DrugDirect=%d",
+                len(vector_chunks), doc_type_counts, len(fts_chunks),
+                len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
-            return _rrf_merge(
+            merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
+            log.info("After RRF: %d chunks", len(merged))
+
+            # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
+            # directly into the pool — bypassing RRF rank penalty.
+            seen_ids = {c.id for c in merged}
+            drug_inject_k = max(2, self._settings.retrieval_top_k // 3)
+            injected = 0
+
+            # Direct lookup chunks take priority — they are the exact drug the user asked about
+            for c in drug_direct_chunks:
+                if injected >= drug_inject_k:
+                    break
+                if c.id not in seen_ids:
+                    merged.append(c)
+                    seen_ids.add(c.id)
+                    injected += 1
+
+            # Fill remaining slots from semantic drug search
+            for c in drug_qdrant_chunks:
+                if injected >= drug_inject_k:
+                    break
+                if c.id not in seen_ids:
+                    merged.append(c)
+                    seen_ids.add(c.id)
+                    injected += 1
+
+            if injected:
+                log.info("Injected %d drug chunks into rerank pool", injected)
+
+            return merged
 
         # Fallback: legacy single Supabase RPC (no Qdrant configured)
         db = await get_db()
@@ -389,6 +438,99 @@ class QwivaRAG:
             },
         ).execute()
         return [_row_to_chunk(r) for r in (response.data or [])]
+
+    async def _drug_direct_lookup(self, query: str) -> list[Chunk]:
+        """Detect drug names in the query and fetch their label sections directly.
+
+        FTS ranking de-prioritises a drug's own label when many other drugs
+        mention that drug by name (e.g. in drug-interaction sections).  This
+        method bypasses ranking entirely: it does a fast ilike lookup on
+        medicine_name, then fetches the most clinically relevant sections for
+        any matched drug.
+        """
+        if not self._settings.enable_drug_retrieval:
+            return []
+
+        db = await get_db()
+        s = self._settings
+
+        # Extract candidate terms (words ≥ 5 chars to avoid stopwords)
+        import re as _re
+        words = list(dict.fromkeys(
+            w for w in _re.split(r"[\s,;]+", query) if len(w) >= 5
+        ))
+        if not words:
+            return []
+
+        # Find distinct medicine_names that match any query word
+        matched_names: set[str] = set()
+        for word in words[:8]:  # cap to avoid too many round-trips
+            try:
+                res = await (
+                    db.table(s.drug_chunk_table)
+                    .select("medicine_name")
+                    .ilike("medicine_name", f"%{word}%")
+                    .limit(3)
+                    .execute()
+                )
+                for r in res.data or []:
+                    if r.get("medicine_name"):
+                        matched_names.add(r["medicine_name"])
+            except Exception:
+                pass
+
+        if not matched_names:
+            return []
+
+        log.info("Drug direct lookup matched names: %s", matched_names)
+
+        # Priority sections — ordered by clinical relevance to any query
+        PRIORITY_SECTIONS = [
+            "pharmacokinetics", "dosage_and_administration",
+            "mechanism_of_action", "indications_and_usage",
+            "adverse_reactions", "pharmacodynamics", "contraindications",
+            "drug_interactions", "use_in_specific_populations",
+        ]
+
+        # Also detect section intent from query keywords
+        query_lower = query.lower()
+        section_hints: list[str] = []
+        if any(k in query_lower for k in ("pharmacokinetic", "absorption", "distribution", "clearance", "half-life")):
+            section_hints.insert(0, "pharmacokinetics")
+        if any(k in query_lower for k in ("dos", "administration", "regimen")):
+            section_hints.insert(0, "dosage_and_administration")
+        if any(k in query_lower for k in ("mechanism", "moa", "action")):
+            section_hints.insert(0, "mechanism_of_action")
+        if any(k in query_lower for k in ("indicat", "approved", "use for")):
+            section_hints.insert(0, "indications_and_usage")
+
+        # Merge: section_hints first, then remaining PRIORITY_SECTIONS
+        ordered_sections = list(dict.fromkeys(section_hints + PRIORITY_SECTIONS))
+
+        chunks: list[Chunk] = []
+        select_cols = (
+            "id, content, medicine_name, inn, atc_code, section_key, section_title, "
+            "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
+        )
+        for name in list(matched_names)[:3]:
+            try:
+                res = await (
+                    db.table(s.drug_chunk_table)
+                    .select(select_cols)
+                    .eq("medicine_name", name)
+                    .in_("section_key", ordered_sections[:5])
+                    .limit(4)
+                    .execute()
+                )
+                fetched = [_drug_row_to_chunk(r) for r in (res.data or [])]
+                # Sort by section priority
+                fetched.sort(key=lambda c: ordered_sections.index(c.section_key) if c.section_key in ordered_sections else 99)
+                chunks.extend(fetched)
+            except Exception as exc:
+                log.warning("Drug direct lookup failed for %s: %s", name, exc)
+
+        log.info("Drug direct lookup: %d chunks for names %s", len(chunks), matched_names)
+        return chunks
 
     async def _qdrant_search(
         self, embedding: list[float], doc_type: str | None = None
@@ -428,9 +570,9 @@ class QwivaRAG:
         guideline_coro = (
             db.table(s.guideline_chunk_table)
             .select(
-                "id, content, guideline_title, cascading_path, pub_year, issuing_body, "
-                "chunk_index, source_url, evidence_tier, grade_strength, grade_direction, "
-                "chunk_type, is_current_version"
+                "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
+                "issuing_body_canonical, chunk_index, source_url, iris_url, evidence_tier, "
+                "grade_strength, grade_direction, chunk_type, is_current_version"
             )
             .filter("fts", "wfts", query)
             .eq("is_current_version", True)
@@ -459,7 +601,7 @@ class QwivaRAG:
         # Guideline results
         guideline_res = results[0]
         if isinstance(guideline_res, Exception):
-            # New table not yet populated or column missing — fall back to documents_v2
+            log.warning("guideline_chunks FTS failed (%s) — falling back to documents_v2", guideline_res)
             legacy_res = await (
                 db.table(s.legacy_chunk_table)
                 .select("id, content, metadata")
@@ -467,21 +609,32 @@ class QwivaRAG:
                 .limit(s.retrieval_top_k)
                 .execute()
             )
-            chunks += [_row_to_chunk(r) for r in (legacy_res.data or [])]
+            g_chunks = [_row_to_chunk(r) for r in (legacy_res.data or [])]
+            log.info("FTS documents_v2 (fallback): %d results", len(g_chunks))
         else:
-            chunks += [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
+            g_chunks = [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
+            log.info("FTS guideline_chunks: %d results", len(g_chunks))
+        chunks += g_chunks
 
         # Drug results (optional)
         if s.enable_drug_retrieval and len(results) > 1:
             drug_res = results[1]
-            if not isinstance(drug_res, Exception):
-                chunks += [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
+            if isinstance(drug_res, Exception):
+                log.warning("drug FTS failed (%s)", drug_res)
+            else:
+                d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
+                log.info("FTS drug_label_chunks: %d results", len(d_chunks))
+                chunks += d_chunks
 
         return chunks
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
             return chunks
+        in_counts: dict[str, int] = {}
+        for c in chunks:
+            in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
+        log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -498,7 +651,12 @@ class QwivaRAG:
         response.raise_for_status()
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
-        return [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
+        kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
+        out_counts: dict[str, int] = {}
+        for c in kept:
+            out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
+        log.info("Rerank output: %d chunks %s", len(kept), out_counts)
+        return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
         embedding = await self._embed(query)
