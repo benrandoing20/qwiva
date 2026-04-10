@@ -72,9 +72,10 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone, sta
                         href={c.source_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-brand-text/85 leading-snug hover:text-brand-accent-hover transition-colors"
+                        className="text-xs text-brand-accent hover:text-brand-accent-hover underline underline-offset-2 decoration-brand-accent/40 transition-colors inline-flex items-baseline gap-1 leading-snug"
                       >
                         {c.guideline_title}
+                        <span className="text-[10px] no-underline flex-shrink-0">↗</span>
                       </a>
                     ) : (
                       <p className="text-xs text-brand-text/85 leading-snug">{c.guideline_title}</p>
