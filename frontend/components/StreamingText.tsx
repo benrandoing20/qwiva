@@ -91,7 +91,7 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
                 </span>
 
                 {/* Hover tooltip — pure CSS, no JS state */}
-                <span className="absolute bottom-full left-0 pb-2 z-50 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto w-80">
+                <span className="absolute top-full left-0 pt-2 z-50 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto w-80">
                   <span className="block bg-brand-surface border border-brand-border rounded-lg shadow-2xl p-3 text-left">
                     <span className="block text-xs font-semibold text-brand-text leading-snug mb-1">
                       {citation.guideline_title}
