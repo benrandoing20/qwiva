@@ -103,7 +103,9 @@ Formatting rules — follow exactly:
 - DOSING: present as a markdown table whenever doses appear in the retrieved \
   guidelines: | Drug | Starting Dose | Route | Frequency | Notes |
 - Citations: use only the [n] numbers from the provided guideline excerpts. \
-  Each source has exactly one number — always cite the same source with the same [n]. \
+  Each source document has exactly one number — if multiple excerpts come from the same \
+  guideline title, they all share the same [n]; never assign a second number to the same source. \
+  Always cite the same source with the same [n] throughout the response. \
   Never invent a citation number for content from your own training knowledge — \
   omit the bracket entirely for any statement not in the provided excerpts. \
   Do not list retrieved sources not referenced in the text.
@@ -1148,13 +1150,16 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
     The leading excerpt of the first (highest-ranked) chunk is stored so
     follow-up questions can reference what was actually retrieved.
     """
-    seen: dict[tuple[str, str], int] = {}
+    seen: dict[str, int] = {}
     citations: list[Citation] = []
     idx = 1
 
     for chunk in chunks:
         title = (chunk.guideline_title or chunk.medicine_name or "").strip()
-        key = (chunk.doc_type, title.lower())
+        # Use title-only key — matches _generate_stream — so legacy + guideline
+        # chunks from the same document collapse to one citation index in both
+        # functions. (doc_type mismatch between FTS/Qdrant caused index skew.)
+        key = title.lower()
         if key not in seen:
             seen[key] = idx
             # For drug chunks, use section_title as the section label
