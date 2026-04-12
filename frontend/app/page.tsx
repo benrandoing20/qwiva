@@ -467,6 +467,17 @@ export default function HomePage() {
     handleSearch(suggestion)
   }
 
+  function handleRate(msg: ChatMessage, ratingValue: 'up' | 'down', comment?: string) {
+    posthog.capture('answer_rated', {
+      rating: ratingValue,
+      comment: comment ?? null,
+      message_id: msg.id,
+      conversation_id: activeConversationId,
+      citation_count: msg.citations?.length ?? 0,
+      evidence_grade: msg.evidence_grade ?? null,
+    })
+  }
+
   const hasMessages = messages.length > 0
   const showHero = !hasMessages && !activeConversationId && !isLoadingConversation
 
@@ -548,7 +559,7 @@ export default function HomePage() {
                 style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
               >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSuggestionClick} />
+                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSuggestionClick} onRate={(r, c) => handleRate(msg, r, c)} />
                 ))}
                 <div ref={bottomRef} />
               </div>
@@ -643,7 +654,7 @@ function BackgroundDoneToast({
 // ---------------------------------------------------------------------------
 // Individual message row
 // ---------------------------------------------------------------------------
-function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: (q: string) => void }) {
+function MessageRow({ message, onSuggest, onRate }: { message: ChatMessage; onSuggest?: (q: string) => void; onRate?: (rating: 'up' | 'down', comment?: string) => void }) {
   if (message.role === 'user') {
     return (
       <div className={`flex justify-end${message.stableKey ? ' animate-fadeIn' : ''}`}>
@@ -675,6 +686,7 @@ function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: 
         statusMessage={message.statusMessage}
         suggestions={message.suggestions}
         onSuggest={onSuggest}
+        onRate={onRate}
       />
     </div>
   )
