@@ -20,8 +20,13 @@ interface Props {
 export default function AnswerCard({ answer, citations, isStreaming, isDone, statusMessage, suggestions, onSuggest }: Props) {
   const [showAll, setShowAll] = useState(false)
 
-  const visible = showAll ? citations : citations.slice(0, MAX_VISIBLE)
-  const hiddenCount = citations.length - MAX_VISIBLE
+  // Deduplicate by title — backend dedup can miss when the same doc is retrieved
+  // as two differently-indexed chunks that both appear in the answer.
+  const uniqueCitations = citations.filter(
+    (c, i, arr) => arr.findIndex(x => x.guideline_title === c.guideline_title) === i
+  )
+  const visible = showAll ? uniqueCitations : uniqueCitations.slice(0, MAX_VISIBLE)
+  const hiddenCount = uniqueCitations.length - MAX_VISIBLE
 
   return (
     <div className="w-full space-y-6">
@@ -44,9 +49,9 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone, sta
       {/* Sources — fade in when done */}
       <div
         className="transition-opacity duration-500"
-        style={{ opacity: isDone && citations.length > 0 ? 1 : 0, pointerEvents: isDone && citations.length > 0 ? 'auto' : 'none' }}
+        style={{ opacity: isDone && uniqueCitations.length > 0 ? 1 : 0, pointerEvents: isDone && uniqueCitations.length > 0 ? 'auto' : 'none' }}
       >
-        {citations.length > 0 && (
+        {uniqueCitations.length > 0 && (
           <div className="pt-4 border-t border-brand-border">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest">

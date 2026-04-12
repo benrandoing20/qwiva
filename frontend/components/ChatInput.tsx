@@ -37,7 +37,7 @@ export default function ChatInput({ value, onChange, onSubmit, isLoading, inConv
   }
 
   return (
-    <div className="flex items-end gap-3 w-full bg-brand-surface border border-brand-border rounded-2xl px-4 py-3 focus-within:border-brand-accent/45 focus-within:ring-1 focus-within:ring-brand-accent/15 transition-colors">
+    <div className="flex items-center gap-3 w-full bg-brand-surface border border-brand-border rounded-2xl px-4 py-3 focus-within:border-brand-accent/45 focus-within:ring-1 focus-within:ring-brand-accent/15 transition-colors">
       <textarea
         ref={textareaRef}
         value={value}

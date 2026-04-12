@@ -24,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           defaultTheme="dark"
           enableSystem={false}
           storageKey="qwiva-theme"
+          disableTransitionOnChange
         >
           <PHProvider>{children}</PHProvider>
         </ThemeProvider>
