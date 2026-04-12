@@ -286,14 +286,21 @@ export default function HomePage() {
     setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
 
-    // Placeholder assistant message for streaming
+    // Placeholder assistant message for streaming.
+    // Inherit citations from the most recent RAG response so that chat-path
+    // follow-ups (which never receive a citations SSE event) can still render
+    // [n] markers as interactive pills. RAG responses override these via the
+    // citations SSE event; chat responses keep the inherited set throughout.
     const tempAssistantId = `temp-assistant-${Date.now()}`
+    const inheritedCitations = [...messages].reverse()
+      .find(m => m.role === 'assistant' && (m.citations?.length ?? 0) > 0)?.citations
     const assistantMsg: ChatMessage = {
       id: tempAssistantId,
       stableKey: tempAssistantId,
       role: 'assistant',
       content: '',
       isStreaming: true,
+      citations: inheritedCitations,
     }
     setMessages((prev) => [...prev, assistantMsg])
 
