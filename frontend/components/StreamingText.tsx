@@ -49,7 +49,6 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
         <table className="min-w-full">{children}</table>
       </div>
     ),
-    // @ts-expect-error — custom HTML element
     cite: ({ 'data-n': n }: { 'data-n': string }) => {
       const firstIdx = parseInt(n.split('-')[0])
       const citation = citations?.find(c => c.index === firstIdx)
@@ -167,7 +166,8 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
-        components={mdComponents}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        components={mdComponents as any}
       >
         {processed}
       </ReactMarkdown>
