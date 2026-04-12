@@ -12,12 +12,45 @@ import ChatInput from '@/components/ChatInput'
 import ConversationSidebar from '@/components/ConversationSidebar'
 import type { Citation, ChatMessage, Conversation } from '@/types'
 
-const SAMPLE_QUERIES = [
-  'First-line malaria treatment in adults',
-  'Managing postpartum haemorrhage',
-  'Severe malnutrition in under-5s',
-  'HIV in pregnancy — ARV regimen',
+const CLINICAL_QUESTIONS = [
+  // Malaria
+  'What is the first-line treatment for uncomplicated malaria in adults?',
+  'How should severe malaria be managed in a pregnant woman?',
+  'When should IV artesunate be used instead of artemether-lumefantrine?',
+  // HIV / TB
+  'Which ARV regimen is recommended in the first trimester of pregnancy?',
+  'How should ART be initiated in a patient with active tuberculosis?',
+  'What prophylaxis is recommended for Pneumocystis pneumonia in HIV?',
+  // Maternal health
+  'What are the steps for managing postpartum haemorrhage?',
+  'When is magnesium sulphate indicated in pre-eclampsia?',
+  'What is the recommended dose of oxytocin in active third-stage management?',
+  // Paediatrics / nutrition
+  'How is severe acute malnutrition managed in a child under 5?',
+  'What are the criteria for inpatient treatment of severe acute malnutrition?',
+  'Which antibiotics are used in complicated severe acute malnutrition?',
+  // Nephrology (KDIGO)
+  'What is the target blood pressure in CKD patients with proteinuria?',
+  'When should dialysis be initiated in acute kidney injury?',
+  'How should cyclophosphamide be dosed in lupus nephritis?',
+  // Infectious disease
+  'What antibiotics are recommended for community-acquired pneumonia in adults?',
+  'How should urinary tract infections in pregnancy be treated?',
+  'What is the empirical antibiotic regimen for adult sepsis?',
+  // Cardiology / endocrine
+  'When is anticoagulation indicated in atrial fibrillation?',
+  'How should a hypertensive emergency be managed acutely?',
+  'What is the glycaemic target for type 2 diabetes in adults?',
+  'When should insulin be initiated in type 2 diabetes?',
+  // Drug-specific
+  'What are the pharmacokinetics of cyclophosphamide?',
+  'What adverse effects of amiodarone require monitoring?',
 ]
+
+function pickRandom(pool: string[], n: number, exclude: string[] = []): string[] {
+  const available = pool.filter((q) => !exclude.includes(q))
+  return [...available].sort(() => Math.random() - 0.5).slice(0, n)
+}
 
 // ---------------------------------------------------------------------------
 // Renumber citations by order of first appearance in the answer text.
@@ -64,13 +97,6 @@ function ThinkingIndicator({ message }: { message: string }) {
         />
       </div>
       <span className="text-sm text-brand-muted tracking-wide">{message}</span>
-
-      <style>{`
-        @keyframes qwivaPulse {
-          0%, 100% { opacity: 0.5; transform: scale(0.85); }
-          50%       { opacity: 1;   transform: scale(1.05); }
-        }
-      `}</style>
     </div>
   )
 }
@@ -100,6 +126,10 @@ export default function HomePage() {
   // Background streams: conversations that finished loading while the user was elsewhere.
   const [backgroundDone, setBackgroundDone] = useState<{ conversationId: string; title: string }[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [shownQuestions, setShownQuestions] = useState<string[]>(CLINICAL_QUESTIONS.slice(0, 3))
+  useEffect(() => {
+    setShownQuestions(pickRandom(CLINICAL_QUESTIONS, 3))
+  }, [])
   // Generation counter: incremented on each new search so the previous stream's
   // finally block doesn't clobber isLoading for a newly started stream.
   const streamGenRef = useRef(0)
@@ -256,14 +286,21 @@ export default function HomePage() {
     setMessages((prev) => [...prev, userMsg])
     setIsLoading(true)
 
-    // Placeholder assistant message for streaming
+    // Placeholder assistant message for streaming.
+    // Inherit citations from the most recent RAG response so that chat-path
+    // follow-ups (which never receive a citations SSE event) can still render
+    // [n] markers as interactive pills. RAG responses override these via the
+    // citations SSE event; chat responses keep the inherited set throughout.
     const tempAssistantId = `temp-assistant-${Date.now()}`
+    const inheritedCitations = [...messages].reverse()
+      .find(m => m.role === 'assistant' && (m.citations?.length ?? 0) > 0)?.citations
     const assistantMsg: ChatMessage = {
       id: tempAssistantId,
       stableKey: tempAssistantId,
       role: 'assistant',
       content: '',
       isStreaming: true,
+      citations: inheritedCitations,
     }
     setMessages((prev) => [...prev, assistantMsg])
 
@@ -271,6 +308,8 @@ export default function HomePage() {
     let realConversationId: string | null = activeConversationId
     let realUserMessageId: string | null = null
     let pendingSuggestions: string[] = []
+    let pendingCitationCount = 0
+    let pendingEvidenceGrade: string | null = null
 
     // Token buffer — accumulate tokens and flush every animation frame (~16ms)
     // instead of calling setMessages on every single token (30–50x/sec with fast models)
@@ -318,6 +357,8 @@ export default function HomePage() {
             ),
           )
         } else if (event.event === 'citations') {
+          pendingCitationCount = event.data.citations?.length ?? 0
+          pendingEvidenceGrade = event.data.evidence_grade ?? null
           setMessages((prev) =>
             prev.map((m) =>
               m.id === tempAssistantId
@@ -359,6 +400,11 @@ export default function HomePage() {
             }),
           )
           // Capture real DB id for use as parent_message_id on next turn
+          posthog.capture('answer_received', {
+            citation_count: pendingCitationCount,
+            has_suggestions: pendingSuggestions.length > 0,
+            evidence_grade: pendingEvidenceGrade,
+          })
           lastAssistantIdRef.current = event.data.assistant_message_id
 
           // If user navigated away during streaming, show a notification bubble
@@ -409,6 +455,7 @@ export default function HomePage() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred.'
+      posthog.capture('search_error', { error_message: msg })
       setMessages((prev) =>
         prev.map((m) =>
           m.id === tempAssistantId
@@ -425,6 +472,17 @@ export default function HomePage() {
   function handleSuggestionClick(suggestion: string) {
     posthog.capture('suggestion_clicked', { suggestion })
     handleSearch(suggestion)
+  }
+
+  function handleRate(msg: ChatMessage, ratingValue: 'up' | 'down', comment?: string) {
+    posthog.capture('answer_rated', {
+      rating: ratingValue,
+      comment: comment ?? null,
+      message_id: msg.id,
+      conversation_id: activeConversationId,
+      citation_count: msg.citations?.length ?? 0,
+      evidence_grade: msg.evidence_grade ?? null,
+    })
   }
 
   const hasMessages = messages.length > 0
@@ -467,23 +525,38 @@ export default function HomePage() {
               <div className="flex flex-col items-center justify-center h-full px-4 pb-24">
                 <div className="text-center mb-10">
                   <div className="flex justify-center mb-4">
-                    <BrandLogo width={200} height={72} className="h-16 w-auto" priority />
+                    <BrandLogo width={280} height={80} className="h-20 w-auto" priority />
                   </div>
                   <p className="text-brand-muted text-base">
                     Kenya&apos;s clinical knowledge platform
                   </p>
                 </div>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {SAMPLE_QUERIES.map((q) => (
+                <div className="w-full max-w-xl space-y-2">
+                  {shownQuestions.map((q) => (
                     <button
                       key={q}
                       onClick={() => handleSearch(q)}
                       disabled={isLoading}
-                      className="px-3.5 py-1.5 text-xs text-brand-muted bg-brand-surface border border-brand-border rounded-full hover:border-brand-accent/35 hover:text-brand-accent-hover transition-all disabled:opacity-50"
+                      className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-sm text-brand-text/80 bg-brand-surface border border-brand-border rounded-xl hover:border-brand-accent/35 hover:text-brand-text transition-all disabled:opacity-50 text-left"
                     >
-                      {q}
+                      <span>{q}</span>
+                      <span className="text-brand-muted flex-shrink-0 text-base">→</span>
                     </button>
                   ))}
+                  <div className="flex justify-center pt-1">
+                    <button
+                      onClick={() => setShownQuestions((prev) => pickRandom(CLINICAL_QUESTIONS, 3, prev))}
+                      className="flex items-center gap-1.5 text-xs text-brand-subtle hover:text-brand-muted transition-colors"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                        <path d="M21 3v5h-5" />
+                        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                        <path d="M8 16H3v5" />
+                      </svg>
+                      Refresh
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -493,7 +566,7 @@ export default function HomePage() {
                 style={{ opacity: isLoadingConversation ? 0.35 : 1 }}
               >
                 {messages.map((msg) => (
-                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSuggestionClick} />
+                  <MessageRow key={msg.stableKey ?? msg.id} message={msg} onSuggest={handleSuggestionClick} onRate={(r, c) => handleRate(msg, r, c)} />
                 ))}
                 <div ref={bottomRef} />
               </div>
@@ -588,7 +661,7 @@ function BackgroundDoneToast({
 // ---------------------------------------------------------------------------
 // Individual message row
 // ---------------------------------------------------------------------------
-function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: (q: string) => void }) {
+function MessageRow({ message, onSuggest, onRate }: { message: ChatMessage; onSuggest?: (q: string) => void; onRate?: (rating: 'up' | 'down', comment?: string) => void }) {
   if (message.role === 'user') {
     return (
       <div className={`flex justify-end${message.stableKey ? ' animate-fadeIn' : ''}`}>
@@ -620,6 +693,7 @@ function MessageRow({ message, onSuggest }: { message: ChatMessage; onSuggest?: 
         statusMessage={message.statusMessage}
         suggestions={message.suggestions}
         onSuggest={onSuggest}
+        onRate={onRate}
       />
     </div>
   )

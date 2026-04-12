@@ -66,6 +66,7 @@ function parseSSEBlock(block: string): SSEEvent | null {
   try {
     return { event, data: JSON.parse(data) } as SSEEvent
   } catch {
+    console.warn('[SSE] Failed to parse event data:', event, data)
     return null
   }
 }
