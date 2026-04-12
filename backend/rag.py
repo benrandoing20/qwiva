@@ -102,9 +102,11 @@ Formatting rules — follow exactly:
   Do not use special symbols such as ☐ → ✓ ⚠️.
 - DOSING: present as a markdown table whenever doses appear in the retrieved \
   guidelines: | Drug | Starting Dose | Route | Frequency | Notes |
-- Citations: place [1] at the end of the sentence or paragraph it supports. \
-  Only cite sources used inline in the response — do not list retrieved sources \
-  not referenced in the text.
+- Citations: use only the [n] numbers from the provided guideline excerpts. \
+  Each source has exactly one number — always cite the same source with the same [n]. \
+  Never invent a citation number for content from your own training knowledge — \
+  omit the bracket entirely for any statement not in the provided excerpts. \
+  Do not list retrieved sources not referenced in the text.
 - End every response with a 🇰🇪 Kenya context note: name specific drugs on the \
   KEML, flag what is unavailable, state the guideline-supported alternative, \
   and note what to do if the recommended treatment or referral pathway is \
@@ -119,7 +121,12 @@ Relevant guideline excerpts:
 
 Answer using only the excerpts above. Place citations sparingly: one [n] at the \
 end of a paragraph or bullet group it supports — not after each individual sentence \
-or bullet.
+or bullet. \
+Citation rules — follow exactly: (1) only use citation numbers [1]-[N] that \
+appear in the excerpts above; (2) each source has exactly one number — always \
+use the same [n] for the same source throughout your response; \
+(3) never invent a citation number for content from your own training knowledge \
+not in the excerpts — omit the bracket entirely for such content.
 """
 
 _CHAT_SYSTEM_PROMPT = """\
