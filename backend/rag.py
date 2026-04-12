@@ -308,8 +308,18 @@ class QwivaRAG:
           5. event: suggestions  (3 follow-up question chips)
         """
         yield _sse("status", {"message": "Searching guidelines…"})
+
+        # Expand short follow-ups ("yes", "Both") into a full clinical question
+        # so the vector store has something meaningful to search against.
+        # _expand_query is a no-op when query is already ≥7 words or history is empty.
+        effective_query = await self._expand_query(query, history or [])
+
         # Accept pre-computed embedding from main.py (saves one embed round-trip).
-        embedding = precomputed_embedding or await self._embed(query)
+        # Re-embed when the query was expanded — the original embedding would be useless.
+        if effective_query != query:
+            embedding = await self._embed(effective_query)
+        else:
+            embedding = precomputed_embedding or await self._embed(query)
 
         # --- semantic cache check ---
         # Skip cache when conversation history is present: a follow-up question
@@ -330,10 +340,10 @@ class QwivaRAG:
             return
 
         # --- full pipeline on cache miss ---
-        top_chunks = await self._hybrid_search(query, embedding)
+        top_chunks = await self._hybrid_search(effective_query, embedding)
 
         yield _sse("status", {"message": "Ranking results…"})
-        chunks = await self._rerank(query, top_chunks)
+        chunks = await self._rerank(effective_query, top_chunks)
 
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
@@ -342,7 +352,7 @@ class QwivaRAG:
 
         yield _sse("status", {"message": "Generating response…"})
         answer_parts: list[str] = []
-        async for token in self._generate_stream(query, chunks, user_id=user_id, history=history):
+        async for token in self._generate_stream(effective_query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
@@ -360,7 +370,7 @@ class QwivaRAG:
         yield _sse("done", {})
 
         # Follow-up suggestions — arrive after done so the answer is already shown
-        suggestions = await self._generate_suggestions(query, full_answer, history, citations)
+        suggestions = await self._generate_suggestions(effective_query, full_answer, history, citations)
         if suggestions:
             yield _sse("suggestions", {"suggestions": suggestions})
 
@@ -743,11 +753,6 @@ class QwivaRAG:
 
     async def classify(self, query: str, history: list[dict]) -> str:
         """Return 'rag' if guideline lookup is needed, 'chat' for conversational reply."""
-        # Fast path: obvious cases resolved without an LLM call
-        quick = _quick_classify(query)
-        if quick:
-            return quick
-
         history_snippet = ""
         if history:
             last_few = history[-6:]
@@ -893,6 +898,45 @@ class QwivaRAG:
     # Direct chat (no retrieval)
     # ------------------------------------------------------------------
 
+    async def _expand_query(self, query: str, history: list[dict]) -> str:
+        """Expand a short follow-up into a full standalone clinical question.
+
+        When a physician answers a clarifying question with "yes", "Both", etc.,
+        the raw word produces meaningless vector search results.  This rewrites
+        the follow-up using recent conversation context so retrieval is accurate.
+        Returns the original query unchanged if it is already specific or if
+        expansion fails.
+        """
+        if len(query.split()) > 6 or not history:
+            return query
+
+        recent = history[-4:]  # last 2 user+assistant pairs
+        ctx = "\n".join(
+            f"{'Physician' if m['role'] == 'user' else 'Assistant'}: "
+            f"{m['content'][:400] if isinstance(m.get('content'), str) else ''}"
+            for m in recent
+        )
+        prompt = (
+            f"Conversation:\n{ctx}\n\n"
+            f"Physician follow-up: \"{query}\"\n\n"
+            "Rewrite as a single complete standalone clinical question capturing exactly "
+            "what the physician is asking, including all relevant patient context from the "
+            "conversation (age, condition, gestational age, etc.). "
+            "Output ONLY the rewritten question, nothing else."
+        )
+        try:
+            resp = await litellm.acompletion(
+                model=self._settings.classify_model,  # groq — fast and cheap
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=120,
+                temperature=0,
+                **self._classify_kwargs,
+            )
+            expanded = resp.choices[0].message.content.strip().strip('"')
+            return expanded if expanded else query
+        except Exception:
+            return query  # fail safe: use original query
+
     async def stream_chat(
         self, query: str, user_id: str, history: list[dict] | None = None
     ) -> AsyncGenerator[str, None]:
@@ -1004,40 +1048,6 @@ rag = QwivaRAG()
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-
-_CHAT_STARTERS = {
-    "thank", "thanks", "ok", "okay", "great", "perfect", "got it",
-    "hi", "hello", "hey", "bye", "goodbye", "yes", "no", "sure",
-    "understood", "noted", "alright", "sounds good",
-}
-
-# Phrases that clearly reference prior conversation content — always route to chat
-_FOLLOWUP_STARTERS = {
-    "can you elaborate", "tell me more", "what about", "explain that",
-    "clarify", "what did source", "from the guidelines", "as you mentioned",
-    "earlier you said", "based on what you", "more detail", "expand on",
-    "could you expand", "can you explain", "what does source", "what does that mean",
-}
-
-def _quick_classify(query: str) -> str | None:
-    """
-    Heuristic pre-filter — avoids an LLM call for obvious cases.
-    Returns 'chat' if clearly conversational/follow-up, None if ambiguous (use LLM).
-    """
-    stripped = query.strip().lower().rstrip("!.,")
-    # Single word or very short phrases that are clearly social
-    if stripped in _CHAT_STARTERS:
-        return "chat"
-    # Short messages whose first word is a social starter and have no clinical terms
-    words = stripped.split()
-    if len(words) <= 4 and words[0] in _CHAT_STARTERS:
-        clinical_hints = {"dose", "mg", "treatment", "?", "how", "what", "when", "why", "which"}
-        if not any(h in stripped for h in clinical_hints):
-            return "chat"
-    # Queries that clearly reference prior context — no new retrieval needed
-    if any(stripped.startswith(p) for p in _FOLLOWUP_STARTERS):
-        return "chat"
-    return None  # ambiguous — let the LLM decide
 
 
 def _trim_history(
