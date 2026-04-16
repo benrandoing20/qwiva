@@ -390,9 +390,9 @@ class QwivaRAG:
         yield _sse("done", {})
 
         # Follow-up suggestions — arrive after done so the answer is already shown
-        suggestions = await self._generate_suggestions(effective_query, full_answer, history, citations)
-        if suggestions:
-            yield _sse("suggestions", {"suggestions": suggestions})
+        # suggestions = await self._generate_suggestions(effective_query, full_answer, history, citations)
+        # if suggestions:
+        #     yield _sse("suggestions", {"suggestions": suggestions})
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -1076,9 +1076,9 @@ class QwivaRAG:
                 yield _sse("token", {"token": token})
         yield _sse("done", {})
 
-        suggestions = await self._generate_suggestions(query, "".join(chat_tokens), history)
-        if suggestions:
-            yield _sse("suggestions", {"suggestions": suggestions})
+        # suggestions = await self._generate_suggestions(query, "".join(chat_tokens), history)
+        # if suggestions:
+        #     yield _sse("suggestions", {"suggestions": suggestions})
 
     # ------------------------------------------------------------------
     # Lazy clients (constructed once, reused across requests)
