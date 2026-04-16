@@ -92,10 +92,14 @@ def _build_payload(row: dict) -> dict:
     }
 
 
-async def ingest(limit: int | None = None) -> None:
+async def ingest(limit: int | None = None, clear_old: bool = False) -> None:
     from qdrant_client import AsyncQdrantClient
     from qdrant_client.models import (
         Distance,
+        FieldCondition,
+        Filter,
+        FilterSelector,
+        MatchValue,
         PointStruct,
         ScalarQuantization,
         ScalarQuantizationConfig,
@@ -133,7 +137,21 @@ async def ingest(limit: int | None = None) -> None:
             ),
         )
     else:
-        log.info("Collection '%s' exists — appending.", settings.qdrant_collection)
+        log.info("Collection '%s' exists.", settings.qdrant_collection)
+
+    # Delete old non-drug points to free space for new CPG data.
+    # Preserves doc_type="drug" points; removes legacy/guideline/missing doc_type.
+    if clear_old:
+        log.info("Deleting old non-drug points from '%s'…", settings.qdrant_collection)
+        await qdrant.delete(
+            collection_name=settings.qdrant_collection,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must_not=[FieldCondition(key="doc_type", match=MatchValue(value="drug"))]
+                )
+            ),
+        )
+        log.info("Old points deleted. Drug chunks preserved.")
 
     # Count rows to ingest
     count_res = await supabase.table(TABLE).select("id", count="exact").execute()
@@ -207,5 +225,10 @@ async def ingest(limit: int | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest CPG chunks into Qdrant")
     parser.add_argument("--limit", type=int, default=None, help="Max rows to ingest (omit for all)")
+    parser.add_argument(
+        "--clear-old",
+        action="store_true",
+        help="Delete existing non-drug points before ingesting (frees space for CPG data)",
+    )
     args = parser.parse_args()
-    asyncio.run(ingest(limit=args.limit))
+    asyncio.run(ingest(limit=args.limit, clear_old=args.clear_old))
