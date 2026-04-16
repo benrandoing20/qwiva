@@ -164,15 +164,15 @@ as a dedicated clinical question to get a fully cited guideline-grounded respons
 class Chunk:
     id: str
     content: str
-    doc_type: str           # "guideline" | "drug" | "legacy"
+    doc_type: str           # "guideline" | "evidence" | "drug" | "legacy"
     guideline_title: str
     cascading_path: str
     year: str
     publisher: str
     chunk_index: int
     source_url: str = ""
-    # Evidence grading — populated from guideline_chunks schema
-    evidence_tier: int = 0          # 1=national_guideline, 2=systematic_review, 3=rct
+    # Evidence grading — populated from guideline/cpg chunk tables
+    evidence_tier: int = 0          # 1=clinical_guideline, 2=systematic_review/meta, 3=rct
     grade_strength: str = ""        # "Strong", "Conditional", "Best Practice"
     grade_direction: str = ""       # "for" | "against"
     chunk_type: str = "text"        # "recommendation" | "text" | "table" | "background"
@@ -183,6 +183,9 @@ class Chunk:
     atc_code: str = ""
     section_key: str = ""
     clinical_priority: str = ""
+    # Extended metadata from new table schemas
+    document_type: str = ""    # original DB value e.g. "systematic_review", "guideline"
+    doi: str = ""              # DOI identifier — used to build https://doi.org/{doi} links
 
 
 # ---------------------------------------------------------------------------
@@ -577,29 +580,39 @@ class QwivaRAG:
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
     async def _fts_search(self, query: str) -> list[Chunk]:
-        """Parallel FTS across guideline_chunks + drug chunk table (+ legacy fallback).
+        """Parallel FTS across cpg_chunks + guideline_chunks (PubMed) + drug chunks.
 
-        Each table has its own tsvector fts column. Results are merged before
-        RRF — the reranker ultimately decides cross-type relevance.
+        clinical_practice_guideline_chunks — NICE and other CPGs (highest clinical priority)
+        guideline_chunks — PubMed articles: SRs, RCTs, trials, research articles
+        Falls back to documents_v2 only if both new tables fail.
         """
         db = await get_db()
         s = self._settings
 
-        # Build coroutines for each active table
-        guideline_coro = (
-            db.table(s.guideline_chunk_table)
-            .select(
-                "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
-                "issuing_body_canonical, chunk_index, source_url, iris_url, evidence_tier, "
-                "grade_strength, grade_direction, chunk_type, is_current_version"
-            )
+        _GUIDELINE_SELECT = (
+            "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
+            "issuing_body_canonical, chunk_index, source_url, doi, iris_url, "
+            "evidence_tier, grade_strength, grade_direction, chunk_type, "
+            "is_current_version, document_type"
+        )
+
+        cpg_coro = (
+            db.table(s.cpg_chunk_table)
+            .select(_GUIDELINE_SELECT)
             .filter("fts", "wfts", query)
-            .eq("is_current_version", True)
             .limit(s.retrieval_top_k)
             .execute()
         )
 
-        coros = [guideline_coro]
+        pubmed_coro = (
+            db.table(s.guideline_chunk_table)
+            .select(_GUIDELINE_SELECT + ", authors, journal")
+            .filter("fts", "wfts", query)
+            .limit(s.retrieval_top_k)
+            .execute()
+        )
+
+        coros: list = [cpg_coro, pubmed_coro]
         if s.enable_drug_retrieval:
             drug_coro = (
                 db.table(s.drug_chunk_table)
@@ -614,32 +627,43 @@ class QwivaRAG:
             coros.append(drug_coro)
 
         results = await asyncio.gather(*coros, return_exceptions=True)
-
         chunks: list[Chunk] = []
+        cpg_res, pubmed_res = results[0], results[1]
 
-        # Guideline results
-        guideline_res = results[0]
-        if isinstance(guideline_res, Exception):
-            log.warning("guideline_chunks FTS failed (%s) — falling back to documents_v2", guideline_res)
-            legacy_res = await (
-                db.table(s.legacy_chunk_table)
-                .select("id, content, metadata")
-                .filter("fts", "wfts", query)
-                .limit(s.retrieval_top_k)
-                .execute()
-            )
-            g_chunks = [_row_to_chunk(r) for r in (legacy_res.data or [])]
-            log.info("FTS documents_v2 (fallback): %d results", len(g_chunks))
+        if isinstance(cpg_res, Exception):
+            log.warning("cpg_chunks FTS failed: %s", cpg_res)
         else:
-            g_chunks = [_guideline_row_to_chunk(r) for r in (guideline_res.data or [])]
-            log.info("FTS guideline_chunks: %d results", len(g_chunks))
-        chunks += g_chunks
+            cpg_chunks = [_cpg_row_to_chunk(r) for r in (cpg_res.data or [])]
+            log.info("FTS clinical_practice_guideline_chunks: %d results", len(cpg_chunks))
+            chunks += cpg_chunks
 
-        # Drug results (optional)
-        if s.enable_drug_retrieval and len(results) > 1:
-            drug_res = results[1]
+        if isinstance(pubmed_res, Exception):
+            log.warning("guideline_chunks FTS failed: %s", pubmed_res)
+        else:
+            pubmed_chunks = [_guideline_row_to_chunk(r) for r in (pubmed_res.data or [])]
+            log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
+            chunks += pubmed_chunks
+
+        # Legacy fallback — only if BOTH new tables fail (e.g. fts column not yet created)
+        if isinstance(cpg_res, Exception) and isinstance(pubmed_res, Exception):
+            log.warning("Both new FTS tables failed — falling back to documents_v2")
+            try:
+                legacy_res = await (
+                    db.table(s.legacy_chunk_table)
+                    .select("id, content, metadata")
+                    .filter("fts", "wfts", query)
+                    .limit(s.retrieval_top_k)
+                    .execute()
+                )
+                chunks += [_row_to_chunk(r) for r in (legacy_res.data or [])]
+                log.info("FTS documents_v2 (fallback): %d results", len(chunks))
+            except Exception as exc:
+                log.error("documents_v2 fallback also failed: %s", exc)
+
+        if s.enable_drug_retrieval and len(results) > 2:
+            drug_res = results[2]
             if isinstance(drug_res, Exception):
-                log.warning("drug FTS failed (%s)", drug_res)
+                log.warning("drug FTS failed: %s", drug_res)
             else:
                 d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
                 log.info("FTS drug_label_chunks: %d results", len(d_chunks))
@@ -1092,19 +1116,58 @@ def _row_to_chunk(row: dict) -> Chunk:
     )
 
 
-def _guideline_row_to_chunk(row: dict) -> Chunk:
-    """Maps a guideline_chunks row to Chunk."""
+def _source_url_from_row(row: dict) -> str:
+    """Build source URL with priority: source_url → doi → iris_url."""
+    doi = row.get("doi") or ""
+    return (
+        row.get("source_url")
+        or (f"https://doi.org/{doi}" if doi else "")
+        or row.get("iris_url", "")
+    ) or ""
+
+
+def _cpg_row_to_chunk(row: dict) -> Chunk:
+    """Maps a clinical_practice_guideline_chunks row to Chunk."""
     return Chunk(
         id=str(row["id"]),
         content=row.get("content", ""),
         doc_type="guideline",
+        document_type=row.get("document_type", "guideline"),
         guideline_title=row.get("guideline_title", "Unknown guideline"),
-        cascading_path=row.get("cascading_path", "") or row.get("chapter_title", ""),
+        cascading_path=row.get("chapter_title", ""),
         year=str(row.get("pub_year", "") or ""),
         publisher=row.get("issuing_body", "") or row.get("issuing_body_canonical", ""),
         chunk_index=int(row.get("chunk_index", 0)),
-        source_url=row.get("source_url", "") or row.get("iris_url", ""),
+        source_url=_source_url_from_row(row),
+        doi=row.get("doi") or "",
         evidence_tier=int(row.get("evidence_tier") or 1),
+        grade_strength=row.get("grade_strength", ""),
+        grade_direction=row.get("grade_direction", ""),
+        chunk_type=row.get("chunk_type", "text"),
+        is_current_version=bool(row.get("is_current_version", True)),
+    )
+
+
+def _guideline_row_to_chunk(row: dict) -> Chunk:
+    """Maps a guideline_chunks (PubMed) row to Chunk."""
+    doc_type_val = row.get("document_type", "")
+    return Chunk(
+        id=str(row["id"]),
+        content=row.get("content", ""),
+        doc_type="guideline" if doc_type_val == "clinical_practice_guideline" else "evidence",
+        document_type=doc_type_val,
+        guideline_title=row.get("guideline_title", "Unknown"),
+        cascading_path=row.get("chapter_title", ""),
+        year=str(row.get("pub_year", "") or ""),
+        publisher=(
+            row.get("issuing_body", "")
+            or row.get("issuing_body_canonical", "")
+            or row.get("journal", "")
+        ),
+        chunk_index=int(row.get("chunk_index", 0)),
+        source_url=_source_url_from_row(row),
+        doi=row.get("doi") or "",
+        evidence_tier=int(row.get("evidence_tier") or 2),
         grade_strength=row.get("grade_strength", ""),
         grade_direction=row.get("grade_direction", ""),
         chunk_type=row.get("chunk_type", "text"),
@@ -1298,16 +1361,25 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         f"{medicine_name} prescribing information ({p.get('source_type', '').upper()})"
         if doc_type == "drug" else "Unknown guideline"
     )
+    doi = p.get("doi", "")
+    source_url = (
+        p.get("source_url", "")
+        or (f"https://doi.org/{doi}" if doi else "")
+        or p.get("url", "")
+        or p.get("iris_url", "")
+    )
     return Chunk(
         id=str(hit.id),
         content=p.get("content", ""),
         doc_type=doc_type,
+        document_type=p.get("document_type", ""),
         guideline_title=title,
         cascading_path=p.get("cascading_path", "") or p.get("chapter_title", "") or p.get("section_title", ""),
         year=str(p.get("year", "") or p.get("pub_year", "") or ""),
         publisher=p.get("publisher", "") or p.get("issuing_body", "") or p.get("source_type", "").upper(),
         chunk_index=int(p.get("chunk_index", 0)),
-        source_url=p.get("source_url", "") or p.get("url", "") or p.get("iris_url", ""),
+        source_url=source_url,
+        doi=doi,
         evidence_tier=int(p.get("evidence_tier") or 0),
         grade_strength=p.get("grade_strength", ""),
         grade_direction=p.get("grade_direction", ""),
