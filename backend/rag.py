@@ -311,6 +311,9 @@ class QwivaRAG:
         """
         yield _sse("status", {"message": "Searching guidelines…"})
 
+        _pipeline_t0 = time.perf_counter()
+        log.info("─── PIPELINE START: %r ───", query[:120])
+
         # Expand short follow-ups ("yes", "Both") into a full clinical question
         # so the vector store has something meaningful to search against.
         # _expand_query is a no-op when query is already ≥7 words or history is empty.
@@ -353,12 +356,19 @@ class QwivaRAG:
         yield _sse("citations", citations_payload.model_dump())
 
         yield _sse("status", {"message": "Generating response…"})
+        _gen_t0 = time.perf_counter()
         answer_parts: list[str] = []
         async for token in self._generate_stream(effective_query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
         full_answer = "".join(answer_parts)
+        _total_ms = (time.perf_counter() - _pipeline_t0) * 1000
+        _gen_ms = (time.perf_counter() - _gen_t0) * 1000
+        log.info(
+            "─── PIPELINE DONE: total=%.0fms  generation=%.0fms  tokens=%d  citations=%d ───",
+            _total_ms, _gen_ms, len(answer_parts), len(citations),
+        )
 
         # Store in cache for future identical/similar queries
         self._cache.store(
@@ -391,24 +401,26 @@ class QwivaRAG:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
                 gather_coros.append(self._drug_direct_lookup(query))
 
+            t0 = time.perf_counter()
             gather_results = await asyncio.gather(*gather_coros)
+            retrieval_ms = (time.perf_counter() - t0) * 1000
+
             vector_chunks: list[Chunk] = gather_results[0]
             fts_chunks: list[Chunk] = gather_results[1]
             drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
             drug_direct_chunks: list[Chunk] = gather_results[3] if self._settings.enable_drug_retrieval else []
 
-            doc_type_counts = {}
-            for c in vector_chunks:
-                doc_type_counts[c.doc_type] = doc_type_counts.get(c.doc_type, 0) + 1
             log.info(
-                "Retrieval: Qdrant=%d %s  FTS=%d  DrugQdrant=%d  DrugDirect=%d",
-                len(vector_chunks), doc_type_counts, len(fts_chunks),
+                "RETRIEVAL [%.0fms]: qdrant=%d  fts=%d  drug_qdrant=%d  drug_direct=%d",
+                retrieval_ms, len(vector_chunks), len(fts_chunks),
                 len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
             merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
-            log.info("After RRF: %d chunks", len(merged))
+            log.info("RRF MERGE: %d → %d chunks (k=%d)", len(vector_chunks) + len(fts_chunks), len(merged), self._settings.rrf_k)
+            for i, c in enumerate(merged[:10], 1):
+                log.info("  [%d] %s | %s | chunk=%d", i, c.doc_type, c.guideline_title[:65], c.chunk_index)
 
             # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
             # directly into the pool — bypassing RRF rank penalty.
@@ -548,7 +560,9 @@ class QwivaRAG:
             except Exception as exc:
                 log.warning("Drug direct lookup failed for %s: %s", name, exc)
 
-        log.info("Drug direct lookup: %d chunks for names %s", len(chunks), matched_names)
+        log.info("DRUG DIRECT: %d chunks for %s", len(chunks), matched_names)
+        for i, c in enumerate(chunks[:4], 1):
+            log.info("  [%d] %s | section=%s", i, c.guideline_title[:65], c.section_key)
         return chunks
 
     async def _qdrant_search(
@@ -567,14 +581,23 @@ class QwivaRAG:
             )
         query_filter = Filter(must=conditions) if conditions else None
 
+        t0 = time.perf_counter()
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
             query_filter=query_filter,
             limit=self._settings.retrieval_top_k,
             with_payload=True,
+            with_vectors=False,
         )
-        return [_qdrant_hit_to_chunk(r) for r in response.points]
+        chunks = [_qdrant_hit_to_chunk(r) for r in response.points]
+        label = f"doc_type={doc_type}" if doc_type else "all"
+        log.info("QDRANT [%.0fms] %s: %d hits", (time.perf_counter() - t0) * 1000, label, len(chunks))
+        for i, c in enumerate(chunks[:5], 1):
+            score = getattr(response.points[i - 1], "score", None)
+            score_str = f"  score={score:.3f}" if score is not None else ""
+            log.info("  [%d] %s | %s | chunk=%d%s", i, c.doc_type, c.guideline_title[:65], c.chunk_index, score_str)
+        return chunks
 
     async def _fts_search(self, query: str) -> list[Chunk]:
         """Parallel FTS across clinical_practice_guideline_chunks + guideline_chunks (PubMed) + drug chunks.
@@ -586,7 +609,7 @@ class QwivaRAG:
         s = self._settings
 
         fts_query = _strip_question_words(_expand_clinical_abbreviations(query).replace("-", " "))
-        log.info("FTS query: %r", fts_query)
+        log.info("FTS query: %r  (raw: %r)", fts_query, query[:100])
 
         cpg_coro = db.rpc("search_cpg_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
         pubmed_coro = db.rpc("search_pubmed_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
@@ -605,33 +628,41 @@ class QwivaRAG:
             )
             coros.append(drug_coro)
 
+        t0 = time.perf_counter()
         results = await asyncio.gather(*coros, return_exceptions=True)
+        elapsed = (time.perf_counter() - t0) * 1000
 
         chunks: list[Chunk] = []
 
         cpg_res, pubmed_res = results[0], results[1]
         if isinstance(cpg_res, Exception):
-            log.warning("search_cpg_fts failed: %s", cpg_res)
+            log.warning("FTS CPG failed: %s", cpg_res)
         else:
             cpg_chunks = [_guideline_row_to_chunk(r) for r in (cpg_res.data or [])]
-            log.info("FTS clinical_practice_guideline_chunks: %d results", len(cpg_chunks))
+            log.info("FTS CPG [%.0fms]: %d hits", elapsed, len(cpg_chunks))
+            for i, c in enumerate(cpg_chunks[:5], 1):
+                log.info("  [%d] %s | chunk=%d | %s", i, c.guideline_title[:65], c.chunk_index, c.cascading_path[:40] or "—")
             chunks += cpg_chunks
 
         if isinstance(pubmed_res, Exception):
-            log.warning("search_pubmed_fts failed: %s", pubmed_res)
+            log.warning("FTS PubMed failed: %s", pubmed_res)
         else:
             pubmed_chunks = [_guideline_row_to_chunk(r) for r in (pubmed_res.data or [])]
-            log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
+            log.info("FTS PubMed [%.0fms]: %d hits", elapsed, len(pubmed_chunks))
+            for i, c in enumerate(pubmed_chunks[:5], 1):
+                log.info("  [%d] %s | chunk=%d | %s", i, c.guideline_title[:65], c.chunk_index, c.cascading_path[:40] or "—")
             chunks += pubmed_chunks
 
-        # Drug results (optional)
-        if s.enable_drug_retrieval and len(results) > 1:
-            drug_res = results[1]
+        # Drug results (optional) — index 2 when drug retrieval is enabled
+        if s.enable_drug_retrieval and len(results) > 2:
+            drug_res = results[2]
             if isinstance(drug_res, Exception):
-                log.warning("drug FTS failed (%s)", drug_res)
+                log.warning("FTS drug failed: %s", drug_res)
             else:
                 d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
-                log.info("FTS drug_label_chunks: %d results", len(d_chunks))
+                log.info("FTS drug [%.0fms]: %d hits", elapsed, len(d_chunks))
+                for i, c in enumerate(d_chunks[:3], 1):
+                    log.info("  [%d] %s | section=%s", i, c.guideline_title[:65], c.section_key)
                 chunks += d_chunks
 
         return chunks
@@ -642,7 +673,9 @@ class QwivaRAG:
         in_counts: dict[str, int] = {}
         for c in chunks:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
-        log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
+        log.info("RERANK INPUT: %d chunks %s", len(chunks), in_counts)
+
+        t0 = time.perf_counter()
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -657,13 +690,20 @@ class QwivaRAG:
             },
         )
         response.raise_for_status()
+        rerank_ms = (time.perf_counter() - t0) * 1000
+
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
         kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
         out_counts: dict[str, int] = {}
         for c in kept:
             out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
-        log.info("Rerank output: %d chunks %s", len(kept), out_counts)
+        log.info("RERANK OUTPUT [%.0fms]: %d → %d chunks %s", rerank_ms, len(chunks), len(kept), out_counts)
+        for i, (r, c) in enumerate(zip(results[: self._settings.rerank_top_n], kept), 1):
+            score = r.get("relevance_score", 0.0)
+            log.info("  [%d] score=%.4f | %s | %s | chunk=%d | %s",
+                     i, score, c.doc_type, c.guideline_title[:60], c.chunk_index,
+                     c.cascading_path[:40] or "—")
         return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
@@ -672,10 +712,12 @@ class QwivaRAG:
         return await self._rerank(query, top_chunks)
 
     async def _embed(self, query: str) -> list[float]:
+        t0 = time.perf_counter()
         response = await self._openai.embeddings.create(
             model=self._settings.embedding_model,
             input=query,
         )
+        log.info("EMBED [%.0fms]", (time.perf_counter() - t0) * 1000)
         return response.data[0].embedding
 
     # ------------------------------------------------------------------
@@ -780,6 +822,7 @@ class QwivaRAG:
             + retrieved_context
             + f"Message: {query}"
         )
+        t0 = time.perf_counter()
         try:
             resp = await litellm.acompletion(
                 model=self._settings.classify_model,
@@ -789,8 +832,11 @@ class QwivaRAG:
                 **self._classify_kwargs,
             )
             result = resp.choices[0].message.content.strip().lower()
-            return "rag" if "rag" in result else "chat"
-        except Exception:
+            mode = "rag" if "rag" in result else "chat"
+            log.info("CLASSIFY [%.0fms]: mode=%s  query=%r", (time.perf_counter() - t0) * 1000, mode, query[:100])
+            return mode
+        except Exception as exc:
+            log.warning("CLASSIFY failed (%.0fms): %s — defaulting to rag", (time.perf_counter() - t0) * 1000, exc)
             return "rag"  # safe default for a clinical app
 
     # ------------------------------------------------------------------
