@@ -164,15 +164,15 @@ as a dedicated clinical question to get a fully cited guideline-grounded respons
 class Chunk:
     id: str
     content: str
-    doc_type: str           # "guideline" | "evidence" | "drug" | "legacy"
+    doc_type: str           # "guideline" | "drug" | "legacy"
     guideline_title: str
     cascading_path: str
     year: str
     publisher: str
     chunk_index: int
     source_url: str = ""
-    # Evidence grading — populated from guideline/cpg chunk tables
-    evidence_tier: int = 0          # 1=clinical_guideline, 2=systematic_review/meta, 3=rct
+    # Evidence grading — populated from guideline_chunks schema
+    evidence_tier: int = 0          # 1=national_guideline, 2=systematic_review, 3=rct
     grade_strength: str = ""        # "Strong", "Conditional", "Best Practice"
     grade_direction: str = ""       # "for" | "against"
     chunk_type: str = "text"        # "recommendation" | "text" | "table" | "background"
@@ -183,9 +183,6 @@ class Chunk:
     atc_code: str = ""
     section_key: str = ""
     clinical_priority: str = ""
-    # Extended metadata from new table schemas
-    document_type: str = ""    # original DB value e.g. "systematic_review", "guideline"
-    doi: str = ""              # DOI identifier — used to build https://doi.org/{doi} links
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +298,6 @@ class QwivaRAG:
         user_id: str,
         history: list[dict] | None = None,
         precomputed_embedding: list[float] | None = None,
-        fts_terms: str = "",
     ) -> AsyncGenerator[str, None]:
         """
         Streaming search. Yields raw SSE-formatted strings.
@@ -313,26 +309,19 @@ class QwivaRAG:
           4. event: done
           5. event: suggestions  (3 follow-up question chips)
         """
-        
-        _t0 = time.perf_counter()
-
         yield _sse("status", {"message": "Searching guidelines…"})
 
         # Expand short follow-ups ("yes", "Both") into a full clinical question
         # so the vector store has something meaningful to search against.
         # _expand_query is a no-op when query is already ≥7 words or history is empty.
-        _ts = time.perf_counter()
         effective_query = await self._expand_query(query, history or [])
-        log.info("LATENCY expand_query: %.3fs", time.perf_counter() - _ts)
 
         # Accept pre-computed embedding from main.py (saves one embed round-trip).
         # Re-embed when the query was expanded — the original embedding would be useless.
-        _ts = time.perf_counter()
         if effective_query != query:
             embedding = await self._embed(effective_query)
         else:
             embedding = precomputed_embedding or await self._embed(query)
-        log.info("LATENCY embed: %.3fs", time.perf_counter() - _ts)
 
         # --- semantic cache check ---
         # Skip cache when conversation history is present: a follow-up question
@@ -350,18 +339,13 @@ class QwivaRAG:
             for i in range(0, len(cached.answer), step):
                 yield _sse("token", {"token": cached.answer[i:i + step]})
             yield _sse("done", {})
-            log.info("LATENCY total (cache hit): %.3fs", time.perf_counter() - _t0)
             return
 
         # --- full pipeline on cache miss ---
-        _ts = time.perf_counter()
-        top_chunks = await self._hybrid_search(effective_query, embedding, fts_terms=fts_terms)
-        log.info("LATENCY hybrid_search total: %.3fs", time.perf_counter() - _ts)
+        top_chunks = await self._hybrid_search(effective_query, embedding)
 
         yield _sse("status", {"message": "Ranking results…"})
-        _ts = time.perf_counter()
         chunks = await self._rerank(effective_query, top_chunks)
-        log.info("LATENCY rerank: %.3fs", time.perf_counter() - _ts)
 
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
@@ -370,18 +354,11 @@ class QwivaRAG:
 
         yield _sse("status", {"message": "Generating response…"})
         answer_parts: list[str] = []
-        _first_token = True
-        _ts_gen = time.perf_counter()
         async for token in self._generate_stream(effective_query, chunks, user_id=user_id, history=history):
-            if _first_token:
-                log.info("LATENCY generation first token: %.3fs", time.perf_counter() - _ts_gen)
-                _first_token = False
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
         full_answer = "".join(answer_parts)
-        log.info("LATENCY generation total: %.3fs", time.perf_counter() - _ts_gen)
-        log.info("LATENCY pipeline total: %.3fs", time.perf_counter() - _t0)
 
         # Store in cache for future identical/similar queries
         self._cache.store(
@@ -403,20 +380,18 @@ class QwivaRAG:
     # Retrieval
     # ------------------------------------------------------------------
 
-    async def _hybrid_search(self, query: str, embedding: list[float], fts_terms: str = "") -> list[Chunk]:
+    async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
         """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
         if self._settings.qdrant_url:
             gather_coros: list = [
-                self._qdrant_search(embedding, exclude_doc_type="drug"),
-                self._fts_search(query, fts_terms=fts_terms),
+                self._qdrant_search(embedding),
+                self._fts_search(query),
             ]
             if self._settings.enable_drug_retrieval:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
                 gather_coros.append(self._drug_direct_lookup(query))
 
-            _ts = time.perf_counter()
             gather_results = await asyncio.gather(*gather_coros)
-            log.info("LATENCY parallel_gather (qdrant+fts+drug): %.3fs", time.perf_counter() - _ts)
             vector_chunks: list[Chunk] = gather_results[0]
             fts_chunks: list[Chunk] = gather_results[1]
             drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
@@ -430,17 +405,10 @@ class QwivaRAG:
                 len(vector_chunks), doc_type_counts, len(fts_chunks),
                 len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
-            for i, c in enumerate(vector_chunks):
-                log.info("  Qdrant[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
-            for i, c in enumerate(fts_chunks):
-                log.info("  FTS[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
-
             merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
             log.info("After RRF: %d chunks", len(merged))
-            for i, c in enumerate(merged):
-                log.info("  RRF[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
 
             # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
             # directly into the pool — bypassing RRF rank penalty.
@@ -584,36 +552,21 @@ class QwivaRAG:
         return chunks
 
     async def _qdrant_search(
-        self, embedding: list[float], doc_type: str | None = None, exclude_doc_type: str | None = None
+        self, embedding: list[float], doc_type: str | None = None
     ) -> list[Chunk]:
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        must: list = []
-        must_not: list = []
-
+        conditions = []
         if self._settings.enable_version_filter:
-            must.append(
+            conditions.append(
                 FieldCondition(key="is_current_version", match=MatchValue(value=True))
             )
         if doc_type:
-            must.append(
+            conditions.append(
                 FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
             )
-        if exclude_doc_type:
-            must_not.append(
-                FieldCondition(key="doc_type", match=MatchValue(value=exclude_doc_type))
-            )
+        query_filter = Filter(must=conditions) if conditions else None
 
-        if must or must_not:
-            query_filter = Filter(
-                must=must if must else None,
-                must_not=must_not if must_not else None,
-            )
-        else:
-            query_filter = None
-
-        
-        _ts = time.perf_counter()
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
@@ -621,65 +574,24 @@ class QwivaRAG:
             limit=self._settings.retrieval_top_k,
             with_payload=True,
         )
-        log.info("LATENCY qdrant_search (doc_type=%s exclude=%s): %.3fs → %d hits", doc_type, exclude_doc_type, time.perf_counter() - _ts, len(response.points))
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
-    async def _fts_search(self, query: str, fts_terms: str = "") -> list[Chunk]:
-        """Parallel FTS across cpg_chunks + guideline_chunks (PubMed) + drug chunks.
+    async def _fts_search(self, query: str) -> list[Chunk]:
+        """Parallel FTS across clinical_practice_guideline_chunks + guideline_chunks (PubMed) + drug chunks.
 
-        clinical_practice_guideline_chunks — NICE and other CPGs (highest clinical priority)
-        guideline_chunks — PubMed articles: SRs, RCTs, trials, research articles
+        Uses RPCs so results are ordered by ts_rank (relevance) before the LIMIT applies.
+        Query is stripped of question/function words then passed as websearch_to_tsquery AND search.
         """
         db = await get_db()
         s = self._settings
 
-        # Prefer AI-extracted terms (from classify call) — these are already stripped
-        # of question words and route abbreviations by the LLM.
-        # Fall back to rule-based stripping when fts_terms isn't available.
-        if fts_terms:
-            # Strip commas and hyphens, then join each term with OR so a chunk
-            # matching ANY key term is retrieved. AND would require all terms
-            # in one chunk — "artesunate artemether lumefantrine" as AND misses
-            # chunks about artesunate alone (severe malaria) or AL alone (uncomplicated).
-            # The reranker selects the most relevant from the broader OR pool.
-            raw_terms = fts_terms.replace(",", " ").replace("-", " ").split()
-            unique_terms = list(dict.fromkeys(t for t in raw_terms if t))  # dedupe, preserve order
-            fts_query = " or ".join(unique_terms)
-        else:
-            fts_query = _expand_clinical_abbreviations(query)
-            fts_query = fts_query.replace("-", " ")
-            fts_query = _strip_question_words(fts_query)
+        fts_query = _strip_question_words(_expand_clinical_abbreviations(query).replace("-", " "))
+        log.info("FTS query: %r", fts_query)
 
-        _fts_t0 = time.perf_counter()
-        log.info("FTS query: %r (source=%s)", fts_query, "ai" if fts_terms else "rule")
+        cpg_coro = db.rpc("search_cpg_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
+        pubmed_coro = db.rpc("search_pubmed_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
 
-        _CPG_SELECT = (
-            "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
-            "issuing_body_canonical, chunk_index, source_url, doi, "
-            "evidence_tier, grade_strength, grade_direction, chunk_type, "
-            "is_current_version, document_type"
-        )
-        _PUBMED_SELECT = (
-            "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
-            "issuing_body_canonical, chunk_index, source_url, doi, iris_url, "
-            "evidence_tier, grade_strength, grade_direction, chunk_type, "
-            "is_current_version, document_type, authors, journal"
-        )
-
-        # Use RPC functions — PostgREST table-filter wfts operator consistently
-        # returns 0 results for tsvector columns due to schema cache/config mismatch.
-        # RPC bypasses this and calls websearch_to_tsquery('english', ...) directly.
-        cpg_coro = db.rpc(
-            "search_cpg_fts",
-            {"query_text": fts_query, "match_count": s.retrieval_top_k},
-        ).execute()
-
-        pubmed_coro = db.rpc(
-            "search_pubmed_fts",
-            {"query_text": fts_query, "match_count": s.retrieval_top_k},
-        ).execute()
-
-        coros: list = [cpg_coro, pubmed_coro]
+        coros = [cpg_coro, pubmed_coro]
         if s.enable_drug_retrieval:
             drug_coro = (
                 db.table(s.drug_chunk_table)
@@ -693,48 +605,44 @@ class QwivaRAG:
             )
             coros.append(drug_coro)
 
-        _ts = time.perf_counter()
         results = await asyncio.gather(*coros, return_exceptions=True)
-        log.info("LATENCY fts_parallel_gather: %.3fs", time.perf_counter() - _ts)
 
         chunks: list[Chunk] = []
-        cpg_res, pubmed_res = results[0], results[1]
 
+        cpg_res, pubmed_res = results[0], results[1]
         if isinstance(cpg_res, Exception):
-            log.warning("cpg_chunks FTS failed: %s", cpg_res)
+            log.warning("search_cpg_fts failed: %s", cpg_res)
         else:
-            cpg_chunks = [_cpg_row_to_chunk(r) for r in (cpg_res.data or [])]
+            cpg_chunks = [_guideline_row_to_chunk(r) for r in (cpg_res.data or [])]
             log.info("FTS clinical_practice_guideline_chunks: %d results", len(cpg_chunks))
             chunks += cpg_chunks
 
         if isinstance(pubmed_res, Exception):
-            log.warning("guideline_chunks FTS failed: %s", pubmed_res)
+            log.warning("search_pubmed_fts failed: %s", pubmed_res)
         else:
             pubmed_chunks = [_guideline_row_to_chunk(r) for r in (pubmed_res.data or [])]
             log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
             chunks += pubmed_chunks
 
-        if s.enable_drug_retrieval and len(results) > 2:
-            drug_res = results[2]
+        # Drug results (optional)
+        if s.enable_drug_retrieval and len(results) > 1:
+            drug_res = results[1]
             if isinstance(drug_res, Exception):
-                log.warning("drug FTS failed: %s", drug_res)
+                log.warning("drug FTS failed (%s)", drug_res)
             else:
                 d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
                 log.info("FTS drug_label_chunks: %d results", len(d_chunks))
                 chunks += d_chunks
 
-        log.info("LATENCY fts_search total: %.3fs → %d chunks", time.perf_counter() - _fts_t0, len(chunks))
         return chunks
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
-        
         if not chunks:
             return chunks
         in_counts: dict[str, int] = {}
         for c in chunks:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
         log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
-        _ts = time.perf_counter()
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -749,7 +657,6 @@ class QwivaRAG:
             },
         )
         response.raise_for_status()
-        log.info("LATENCY rerank_http: %.3fs", time.perf_counter() - _ts)
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
         kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
@@ -757,9 +664,6 @@ class QwivaRAG:
         for c in kept:
             out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
         log.info("Rerank output: %d chunks %s", len(kept), out_counts)
-        for r in results[: self._settings.rerank_top_n]:
-            c = chunks[r["index"]]
-            log.info("  Reranked[%.4f] %s — %s", r.get("relevance_score", 0), c.doc_type, c.guideline_title or c.id)
         return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
@@ -838,13 +742,8 @@ class QwivaRAG:
     # Routing: classify a user message
     # ------------------------------------------------------------------
 
-    async def classify(self, query: str, history: list[dict]) -> tuple[str, str]:
-        """Return (mode, fts_terms).
-
-        mode: 'rag' (guideline lookup needed) or 'chat' (conversational reply)
-        fts_terms: key medical/clinical terms extracted from the query for FTS,
-                   empty string when mode is 'chat'
-        """
+    async def classify(self, query: str, history: list[dict]) -> str:
+        """Return 'rag' if guideline lookup is needed, 'chat' for conversational reply."""
         history_snippet = ""
         if history:
             last_few = history[-6:]
@@ -852,6 +751,7 @@ class QwivaRAG:
                 f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
             )
 
+        # Surface last assistant message content so classifier knows what was already retrieved
         retrieved_context = ""
         if history:
             last_assistant = next(
@@ -864,44 +764,34 @@ class QwivaRAG:
                 )
 
         prompt = (
-            "You are a router for a clinical assistant. Reply with ONLY valid JSON on one line.\n\n"
-            'Format: {"mode": "rag", "terms": "key medical terms"}\n\n'
-            "mode rules:\n"
-            "  rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
-            "  chat = greeting, thanks, small talk, follow-up answerable from history, vague presentations\n\n"
+            "Classify this message for a clinical assistant.\n"
+            "Reply with ONLY one word: rag OR chat\n\n"
+            "rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
+            "chat = greeting, thanks, small talk, follow-up question about the previous answer, "
+            "or any question answerable from the conversation history above\n\n"
             "Vague patient presentations without a specific clinical question "
-            '(e.g. "my patient is unwell") → chat\n'
-            "A follow-up introducing a NEW drug, dose, or clinical scenario not yet discussed → rag\n"
-            "IMPORTANT: If content already retrieved (below) covers the question → chat\n\n"
-            "terms rules:\n"
-            "  Extract only the core clinical condition, drug names, or procedure being asked about.\n"
-            "  Omit: question words (when/what/how/why), verbs (used/given/treat/manage), "
-            "prepositions (instead/versus/compared), route abbreviations (IV/IM/SC/PO), "
-            "patient demographics (parity, gestational age, gravida/para notation, age, weight).\n"
-            "  Good: 'PPROM preterm premature rupture membranes' — Bad: 'para 1+0 PPROM 27 weeks'\n"
-            "  Leave empty string if mode is chat.\n\n"
+            "(e.g. \"my patient is unwell\", \"I have a patient with fever\") → chat, "
+            "so the assistant can ask what specific information is needed.\n\n"
+            "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
+            "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
+            "IMPORTANT: If the content already retrieved (shown below) contains the information "
+            "needed to answer the current message, classify as chat — do NOT trigger another RAG lookup.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
             + retrieved_context
             + f"Message: {query}"
         )
         try:
-            import json as _json
             resp = await litellm.acompletion(
                 model=self._settings.classify_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=60,
+                max_tokens=5,
                 temperature=0,
                 **self._classify_kwargs,
             )
-            raw = resp.choices[0].message.content.strip()
-            parsed = _json.loads(raw)
-            mode = "rag" if str(parsed.get("mode", "rag")).lower() == "rag" else "chat"
-            fts_terms = str(parsed.get("terms", "")).strip()
-            log.info("Classify → mode=%s  fts_terms=%r", mode, fts_terms)
-            return mode, fts_terms
-        except Exception as exc:
-            log.warning("Classify failed (%s) — defaulting to rag", exc)
-            return "rag", _strip_question_words(query)
+            result = resp.choices[0].message.content.strip().lower()
+            return "rag" if "rag" in result else "chat"
+        except Exception:
+            return "rag"  # safe default for a clinical app
 
     # ------------------------------------------------------------------
     # Follow-up suggestions
@@ -1191,77 +1081,19 @@ def _row_to_chunk(row: dict) -> Chunk:
     )
 
 
-def _is_public_url(url: str) -> bool:
-    """Return True only for publicly accessible HTTP(S) URLs with a real hostname."""
-    if not url:
-        return False
-    # Reject internal storage paths: double-slash after scheme, or no real hostname
-    # e.g. "https://storage//corpus-raw/..." or "storage://..." or relative paths
-    if not url.startswith("http"):
-        return False
-    try:
-        from urllib.parse import urlparse
-        p = urlparse(url)
-        # Must have a hostname with at least one dot (rules out bare "storage")
-        return bool(p.netloc and "." in p.netloc)
-    except Exception:
-        return False
-
-
-def _source_url_from_row(row: dict) -> str:
-    """Build source URL with priority: source_url (public only) → doi → iris_url."""
-    doi = row.get("doi") or ""
-    raw = row.get("source_url") or ""
-    public = raw if _is_public_url(raw) else ""
-    return (
-        public
-        or (f"https://doi.org/{doi}" if doi else "")
-        or row.get("iris_url", "")
-    ) or ""
-
-
-def _cpg_row_to_chunk(row: dict) -> Chunk:
-    """Maps a clinical_practice_guideline_chunks row to Chunk."""
+def _guideline_row_to_chunk(row: dict) -> Chunk:
+    """Maps a guideline_chunks row to Chunk."""
     return Chunk(
         id=str(row["id"]),
         content=row.get("content", ""),
         doc_type="guideline",
-        document_type=row.get("document_type", "guideline"),
         guideline_title=row.get("guideline_title", "Unknown guideline"),
-        cascading_path=row.get("chapter_title", ""),
+        cascading_path=row.get("cascading_path", "") or row.get("chapter_title", ""),
         year=str(row.get("pub_year", "") or ""),
         publisher=row.get("issuing_body", "") or row.get("issuing_body_canonical", ""),
         chunk_index=int(row.get("chunk_index", 0)),
-        source_url=_source_url_from_row(row),
-        doi=row.get("doi") or "",
+        source_url=row.get("source_url", "") or row.get("iris_url", ""),
         evidence_tier=int(row.get("evidence_tier") or 1),
-        grade_strength=row.get("grade_strength", ""),
-        grade_direction=row.get("grade_direction", ""),
-        chunk_type=row.get("chunk_type", "text"),
-        is_current_version=bool(row.get("is_current_version", True)),
-    )
-
-
-def _guideline_row_to_chunk(row: dict) -> Chunk:
-    """Maps a guideline_chunks (PubMed) row to Chunk."""
-    doc_type_val = row.get("document_type", "")
-    return Chunk(
-        id=str(row["id"]),
-        content=row.get("content", ""),
-        doc_type="guideline" if doc_type_val == "clinical_practice_guideline" else "evidence",
-        document_type=doc_type_val,
-        guideline_title=row.get("guideline_title", "Unknown"),
-        cascading_path=row.get("chapter_title", ""),
-        year=str(row.get("pub_year", "") or ""),
-        publisher=(
-            row.get("issuing_body", "")
-            or row.get("issuing_body_canonical", "")
-            or row.get("journal", "")
-        ),
-        chunk_index=int(row.get("chunk_index", 0)),
-        source_url=_source_url_from_row(row),
-        doi=row.get("doi") or "",
-        evidence_tier=int(row.get("evidence_tier") or 2),
         grade_strength=row.get("grade_strength", ""),
         grade_direction=row.get("grade_direction", ""),
         chunk_type=row.get("chunk_type", "text"),
@@ -1293,6 +1125,103 @@ def _drug_row_to_chunk(row: dict) -> Chunk:
         chunk_type="drug_label",
     )
 
+
+
+_CLINICAL_ABBREVS: dict[str, str] = {
+    r"\bARVs?\b": "antiretroviral",
+    r"\bART\b": "antiretroviral therapy",
+    r"\bTB\b": "tuberculosis",
+    r"\bMDR-TB\b": "multidrug resistant tuberculosis",
+    r"\bPPH\b": "postpartum haemorrhage",
+    r"\bPE\b": "pre-eclampsia",
+    r"\bSAM\b": "severe acute malnutrition",
+    r"\bCOPD\b": "chronic obstructive pulmonary disease",
+    r"\bCAP\b": "community acquired pneumonia",
+    r"\bUTI\b": "urinary tract infection",
+    r"\bRDS\b": "respiratory distress syndrome",
+    r"\bHTN\b": "hypertension",
+    r"\bDM\b": "diabetes mellitus",
+    r"\bT2DM\b": "type 2 diabetes",
+    r"\bACS\b": "acute coronary syndrome",
+    r"\bHF\b": "heart failure",
+    r"\bPPROM\b": "preterm premature rupture membranes",
+    r"\bPROM\b": "premature rupture membranes",
+    r"\bIgAN\b": "IgA nephropathy",
+    r"\bCKD\b": "chronic kidney disease",
+    r"\bGDM\b": "gestational diabetes",
+    r"\bPIH\b": "pregnancy induced hypertension",
+    r"\bAPH\b": "antepartum haemorrhage",
+    r"\bPID\b": "pelvic inflammatory disease",
+    r"\bSTI\b": "sexually transmitted infection",
+    r"\bSLE\b": "systemic lupus erythematosus",
+    r"\bRA\b": "rheumatoid arthritis",
+    r"\bOA\b": "osteoarthritis",
+    r"\bNEC\b": "necrotising enterocolitis",
+    r"\bIVH\b": "intraventricular haemorrhage",
+    r"\bBPD\b": "bronchopulmonary dysplasia",
+    r"\bROP\b": "retinopathy of prematurity",
+    r"\bAKI\b": "acute kidney injury",
+    r"\bDKA\b": "diabetic ketoacidosis",
+    r"\bAFI\b": "amniotic fluid index",
+    r"\bFGR\b": "fetal growth restriction",
+    r"\bIUGR\b": "intrauterine growth restriction",
+    r"\bGBS\b": "group B streptococcus",
+    r"\bPCOS\b": "polycystic ovary syndrome",
+    r"\bCVD\b": "cardiovascular disease",
+    r"\bAVN\b": "avascular necrosis",
+    r"\bDVT\b": "deep vein thrombosis",
+    r"\bPE\b": "pre-eclampsia",
+    r"\bVTE\b": "venous thromboembolism",
+}
+
+_FTS_STRIP: frozenset[str] = frozenset({
+    # Question words
+    "when", "what", "how", "why", "where", "which", "who", "whom",
+    # Modals
+    "should", "would", "could", "can", "may", "might", "must", "shall",
+    # Common verbs in presentations
+    "used", "use", "given", "give", "prescribed", "prescribe",
+    "have", "has", "had", "been", "being", "does", "doing",
+    "want", "need", "like", "find",
+    # Prepositions / connectors
+    "instead", "versus", "compared", "from", "with", "without",
+    "about", "above", "after", "before", "during", "between",
+    "into", "onto", "upon", "also", "then", "thus",
+    # Route abbreviations
+    "iv", "im", "sc", "po", "od", "bd", "tds", "qds",
+    # Patient demographic words — these never appear in guideline chunks
+    # and break AND logic when left in the FTS query
+    "patient", "patients", "year", "years", "old", "aged", "age",
+    "male", "female", "woman", "women", "man", "men", "boy", "girl",
+    "para", "gravida", "parity",
+    "weeks", "days", "months", "trimester", "gestation", "gestational",
+    # Presentation language
+    "presenting", "presented", "presents", "presentation",
+    "complains", "complaining", "complained", "complaint",
+    "noticed", "developed", "diagnosed", "known", "history",
+    "background", "baseline", "current", "recent",
+})
+
+
+def _expand_clinical_abbreviations(query: str) -> str:
+    result = query
+    for pattern, expansion in _CLINICAL_ABBREVS.items():
+        result = re.sub(pattern, expansion, result, flags=re.IGNORECASE)
+    return result
+
+
+def _strip_question_words(text: str) -> str:
+    # Strip punctuation including + (removes patient notation like G2P1+0)
+    words = re.sub(r"[?.,!;:()\[\]/+]", " ", text.lower()).split()
+    # Drop stop words, short tokens, pure numbers, and any token containing digits
+    # (catches patient notation like g2p1, g3p2, etc. that never appear in guideline text)
+    return " ".join(
+        w for w in words
+        if len(w) >= 3
+        and w not in _FTS_STRIP
+        and not w.isdigit()
+        and not re.search(r'\d', w)
+    )
 
 
 _EXCERPT_CHARS = 400  # chars of chunk content stored per citation for follow-up grounding
@@ -1424,67 +1353,6 @@ def _suggestion_grounded(suggestion: str, answer: str) -> bool:
     return all(w.lower() in answer_lower for w in entity_words)
 
 
-_CLINICAL_ABBREVS: dict[str, str] = {
-    r"\bARVs?\b": "antiretroviral",
-    r"\bART\b": "antiretroviral therapy",
-    r"\bTB\b": "tuberculosis",
-    r"\bMDR-TB\b": "multidrug resistant tuberculosis",
-    r"\bXDR-TB\b": "extensively drug resistant tuberculosis",
-    r"\bIPT\b": "isoniazid preventive therapy",
-    r"\bPMTCT\b": "prevention of mother to child transmission",
-    r"\bHTN\b": "hypertension",
-    r"\bDM\b": "diabetes mellitus",
-    r"\bT2DM\b": "type 2 diabetes",
-    r"\bCHD\b": "coronary heart disease",
-    r"\bACS\b": "acute coronary syndrome",
-    r"\bMI\b": "myocardial infarction",
-    r"\bHF\b": "heart failure",
-    r"\bCOPD\b": "chronic obstructive pulmonary disease",
-    r"\bPPH\b": "postpartum haemorrhage",
-    r"\bPE\b": "pre-eclampsia",
-    r"\bSSI\b": "surgical site infection",
-    r"\bUTI\b": "urinary tract infection",
-    r"\bRDS\b": "respiratory distress syndrome",
-    r"\bSAM\b": "severe acute malnutrition",
-}
-
-
-def _expand_clinical_abbreviations(query: str) -> str:
-    import re
-    result = query
-    for pattern, expansion in _CLINICAL_ABBREVS.items():
-        result = re.sub(pattern, expansion, result)
-    return result
-
-
-# Words that appear in clinical questions but not in guideline text, and that
-# PostgreSQL's English config does NOT treat as stopwords — so they'd be required
-# by websearch_to_tsquery's AND logic and prevent real matches.
-_FTS_STRIP: frozenset[str] = frozenset({
-    # WH-question words
-    "when", "what", "how", "why", "where", "which", "who", "whom",
-    # Modals (PG may or may not strip these)
-    "should", "would", "could", "can", "may", "might", "must", "shall",
-    # Non-clinical verbs common in questions
-    "used", "use", "given", "give", "prescribed", "prescribe",
-    # Comparison/transition words
-    "instead", "versus", "compared", "comparison",
-    # Short route-of-admin abbreviations (iv, im, sc, po — not useful as FTS terms)
-    "iv", "im", "sc", "po",
-})
-
-
-def _strip_question_words(text: str) -> str:
-    """Remove English question/function words — keep only clinical content terms.
-
-    Words shorter than 3 chars are also dropped (catches route abbreviations like
-    'iv', 'al', 'sc' that would be required by AND logic but absent from some docs).
-    """
-    import re as _re
-    words = _re.sub(r"[?.,!;:()\[\]/]", " ", text.lower()).split()
-    return " ".join(w for w in words if len(w) >= 3 and w not in _FTS_STRIP)
-
-
 def _rrf_merge(
     vector_chunks: list[Chunk],
     fts_chunks: list[Chunk],
@@ -1516,25 +1384,16 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         f"{medicine_name} prescribing information ({p.get('source_type', '').upper()})"
         if doc_type == "drug" else "Unknown guideline"
     )
-    doi = p.get("doi", "")
-    _raw_url = p.get("source_url", "") or p.get("url", "") or ""
-    source_url = (
-        (_raw_url if _is_public_url(_raw_url) else "")
-        or (f"https://doi.org/{doi}" if doi else "")
-        or p.get("iris_url", "")
-    )
     return Chunk(
         id=str(hit.id),
         content=p.get("content", ""),
         doc_type=doc_type,
-        document_type=p.get("document_type", ""),
         guideline_title=title,
         cascading_path=p.get("cascading_path", "") or p.get("chapter_title", "") or p.get("section_title", ""),
         year=str(p.get("year", "") or p.get("pub_year", "") or ""),
         publisher=p.get("publisher", "") or p.get("issuing_body", "") or p.get("source_type", "").upper(),
         chunk_index=int(p.get("chunk_index", 0)),
-        source_url=source_url,
-        doi=doi,
+        source_url=p.get("source_url", "") or p.get("url", "") or p.get("iris_url", ""),
         evidence_tier=int(p.get("evidence_tier") or 0),
         grade_strength=p.get("grade_strength", ""),
         grade_direction=p.get("grade_direction", ""),

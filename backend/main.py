@@ -336,7 +336,7 @@ async def search_stream(
 
             # Classify: guideline lookup needed, or conversational reply?
             # Also extracts key clinical terms for FTS in the same LLM call.
-            mode, fts_terms = await rag.classify(body.query, history)
+            mode = await rag.classify(body.query, history)
 
             # Stream response — both generators yield SSE-formatted strings
             tokens: list[str] = []
@@ -347,9 +347,7 @@ async def search_stream(
             generator = (
                 rag.stream_chat(body.query, user.user_id, history)
                 if mode == "chat"
-                # Pass pre-computed embedding so stream_search skips its own embed call;
-                # pass AI-extracted fts_terms so FTS uses clinical terms, not the full sentence.
-                else rag.stream_search(body.query, user.user_id, history, precomputed_embedding=embedding, fts_terms=fts_terms)
+                else rag.stream_search(body.query, user.user_id, history, precomputed_embedding=embedding)
             )
 
             async for chunk in generator:
