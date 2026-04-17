@@ -36,7 +36,7 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
             </svg>
           </button>
         )}
-        <BrandLogo width={104} height={36} className="h-8 w-auto" priority />
+        {/* <BrandLogo width={104} height={36} className="h-8 w-auto" priority /> */}
         <nav className="flex items-center gap-1">
           <Link
             href="/"
