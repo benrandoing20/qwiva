@@ -637,9 +637,14 @@ class QwivaRAG:
         # of question words and route abbreviations by the LLM.
         # Fall back to rule-based stripping when fts_terms isn't available.
         if fts_terms:
-            # Commas from LLM output are noise for websearch_to_tsquery; strip them.
-            # Hyphens become NOT operators — replace with spaces.
-            fts_query = fts_terms.replace(",", " ").replace("-", " ")
+            # Strip commas and hyphens, then join each term with OR so a chunk
+            # matching ANY key term is retrieved. AND would require all terms
+            # in one chunk — "artesunate artemether lumefantrine" as AND misses
+            # chunks about artesunate alone (severe malaria) or AL alone (uncomplicated).
+            # The reranker selects the most relevant from the broader OR pool.
+            raw_terms = fts_terms.replace(",", " ").replace("-", " ").split()
+            unique_terms = list(dict.fromkeys(t for t in raw_terms if t))  # dedupe, preserve order
+            fts_query = " or ".join(unique_terms)
         else:
             fts_query = _expand_clinical_abbreviations(query)
             fts_query = fts_query.replace("-", " ")
