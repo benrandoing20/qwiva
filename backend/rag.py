@@ -620,7 +620,11 @@ class QwivaRAG:
         db = await get_db()
         s = self._settings
         fts_query = _expand_clinical_abbreviations(query)
-        
+        # Replace hyphens with spaces — websearch_to_tsquery treats "-word" as NOT,
+        # so "artemether-lumefantrine" becomes "artemether AND NOT lumefantrine" and
+        # excludes the very guidelines that discuss both drugs together.
+        fts_query = fts_query.replace("-", " ")
+
         _fts_t0 = time.perf_counter()
         if fts_query != query:
             log.info("FTS query expanded: %r → %r", query, fts_query)
