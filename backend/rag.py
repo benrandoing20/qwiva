@@ -387,7 +387,7 @@ class QwivaRAG:
         """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
         if self._settings.qdrant_url:
             gather_coros: list = [
-                self._qdrant_search(embedding),
+                self._qdrant_search(embedding, doc_type="guideline"),
                 self._fts_search(query),
             ]
             if self._settings.enable_drug_retrieval:
@@ -588,6 +588,7 @@ class QwivaRAG:
         """
         db = await get_db()
         s = self._settings
+        fts_query = _expand_clinical_abbreviations(query)
 
         _CPG_SELECT = (
             "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
@@ -605,7 +606,7 @@ class QwivaRAG:
         cpg_coro = (
             db.table(s.cpg_chunk_table)
             .select(_CPG_SELECT)
-            .filter("fts", "wfts", query)
+            .filter("fts", "wfts", fts_query)
             .limit(s.retrieval_top_k)
             .execute()
         )
@@ -613,7 +614,7 @@ class QwivaRAG:
         pubmed_coro = (
             db.table(s.guideline_chunk_table)
             .select(_PUBMED_SELECT)
-            .filter("fts", "wfts", query)
+            .filter("fts", "wfts", fts_query)
             .limit(s.retrieval_top_k)
             .execute()
         )
@@ -626,7 +627,7 @@ class QwivaRAG:
                     "id, content, medicine_name, inn, atc_code, section_key, section_title, "
                     "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
                 )
-                .filter("fts", "wfts", query)
+                .filter("fts", "wfts", fts_query)
                 .limit(max(1, s.retrieval_top_k // 2))
                 .execute()
             )
@@ -1321,6 +1322,39 @@ def _suggestion_grounded(suggestion: str, answer: str) -> bool:
     if not entity_words:
         return True
     return all(w.lower() in answer_lower for w in entity_words)
+
+
+_CLINICAL_ABBREVS: dict[str, str] = {
+    r"\bARVs?\b": "antiretroviral",
+    r"\bART\b": "antiretroviral therapy",
+    r"\bTB\b": "tuberculosis",
+    r"\bMDR-TB\b": "multidrug resistant tuberculosis",
+    r"\bXDR-TB\b": "extensively drug resistant tuberculosis",
+    r"\bIPT\b": "isoniazid preventive therapy",
+    r"\bPMTCT\b": "prevention of mother to child transmission",
+    r"\bHTN\b": "hypertension",
+    r"\bDM\b": "diabetes mellitus",
+    r"\bT2DM\b": "type 2 diabetes",
+    r"\bCHD\b": "coronary heart disease",
+    r"\bACS\b": "acute coronary syndrome",
+    r"\bMI\b": "myocardial infarction",
+    r"\bHF\b": "heart failure",
+    r"\bCOPD\b": "chronic obstructive pulmonary disease",
+    r"\bPPH\b": "postpartum haemorrhage",
+    r"\bPE\b": "pre-eclampsia",
+    r"\bSSI\b": "surgical site infection",
+    r"\bUTI\b": "urinary tract infection",
+    r"\bRDS\b": "respiratory distress syndrome",
+    r"\bSAM\b": "severe acute malnutrition",
+}
+
+
+def _expand_clinical_abbreviations(query: str) -> str:
+    import re
+    result = query
+    for pattern, expansion in _CLINICAL_ABBREVS.items():
+        result = re.sub(pattern, expansion, result)
+    return result
 
 
 def _rrf_merge(
