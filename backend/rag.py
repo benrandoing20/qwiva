@@ -680,6 +680,9 @@ class QwivaRAG:
 
         return chunks
 
+    # NVIDIA llama-3.2-nv-rerankqa-1b-v2 max document length (~512 tokens ≈ 1800 chars)
+    _RERANK_MAX_CHARS = 1800
+
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
             return chunks
@@ -688,23 +691,51 @@ class QwivaRAG:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
         log.info("RERANK INPUT: %d chunks %s", len(chunks), in_counts)
 
-        t0 = time.perf_counter()
-        response = await self._http.post(
-            self._settings.rerank_base_url,
-            headers={
-                "Authorization": f"Bearer {self._settings.nvidia_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self._settings.rerank_model,
-                "query": query,
-                "documents": [c.content for c in chunks],
-                "top_n": self._settings.rerank_top_n,
-            },
-        )
-        response.raise_for_status()
-        rerank_ms = (time.perf_counter() - t0) * 1000
+        # Truncate each document to the model's max length — the most common cause of 400s
+        documents = [c.content[:self._RERANK_MAX_CHARS] for c in chunks]
 
+        t0 = time.perf_counter()
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self._http.post(
+                    self._settings.rerank_base_url,
+                    headers={
+                        "Authorization": f"Bearer {self._settings.nvidia_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._settings.rerank_model,
+                        "query": query[:500],  # also cap query length
+                        "documents": documents,
+                        "top_n": self._settings.rerank_top_n,
+                    },
+                )
+                response.raise_for_status()
+                break
+            except Exception as exc:
+                last_exc = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status == 400 and attempt == 0:
+                    # Halve document length and retry once
+                    documents = [d[:self._RERANK_MAX_CHARS // 2] for d in documents]
+                    log.warning("RERANK 400 — retrying with shorter documents (%d chars)", self._RERANK_MAX_CHARS // 2)
+                    continue
+                if status in (429, 500, 502, 503, 504):
+                    wait = 2 ** attempt
+                    log.warning("RERANK %s — retry %d in %ds", status, attempt + 1, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                # Non-retriable error — fall through to unranked fallback
+                break
+        else:
+            last_exc = last_exc  # loop exhausted
+
+        if last_exc is not None:
+            log.warning("RERANK failed after retries (%s) — returning top-%d unranked", last_exc, self._settings.rerank_top_n)
+            return chunks[: self._settings.rerank_top_n]
+
+        rerank_ms = (time.perf_counter() - t0) * 1000
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
         kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
