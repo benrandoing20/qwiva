@@ -624,7 +624,9 @@ class QwivaRAG:
         # of question words and route abbreviations by the LLM.
         # Fall back to rule-based stripping when fts_terms isn't available.
         if fts_terms:
-            fts_query = fts_terms.replace("-", " ")
+            # Commas from LLM output are noise for websearch_to_tsquery; strip them.
+            # Hyphens become NOT operators — replace with spaces.
+            fts_query = fts_terms.replace(",", " ").replace("-", " ")
         else:
             fts_query = _expand_clinical_abbreviations(query)
             fts_query = fts_query.replace("-", " ")
@@ -854,9 +856,11 @@ class QwivaRAG:
             "A follow-up introducing a NEW drug, dose, or clinical scenario not yet discussed → rag\n"
             "IMPORTANT: If content already retrieved (below) covers the question → chat\n\n"
             "terms rules:\n"
-            "  Extract only drug names, conditions, procedures, and clinical concepts.\n"
-            "  Omit: question words (when/what/how/why), verbs (used/given/treat), "
-            "prepositions (instead/versus/compared), route abbreviations (IV/IM/SC/PO).\n"
+            "  Extract only the core clinical condition, drug names, or procedure being asked about.\n"
+            "  Omit: question words (when/what/how/why), verbs (used/given/treat/manage), "
+            "prepositions (instead/versus/compared), route abbreviations (IV/IM/SC/PO), "
+            "patient demographics (parity, gestational age, gravida/para notation, age, weight).\n"
+            "  Good: 'PPROM preterm premature rupture membranes' — Bad: 'para 1+0 PPROM 27 weeks'\n"
             "  Leave empty string if mode is chat.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
             + retrieved_context
