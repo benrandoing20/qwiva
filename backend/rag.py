@@ -408,10 +408,17 @@ class QwivaRAG:
                 len(vector_chunks), doc_type_counts, len(fts_chunks),
                 len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
+            for i, c in enumerate(vector_chunks):
+                log.info("  Qdrant[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
+            for i, c in enumerate(fts_chunks):
+                log.info("  FTS[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
+
             merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
             log.info("After RRF: %d chunks", len(merged))
+            for i, c in enumerate(merged):
+                log.info("  RRF[%d] %s — %s", i + 1, c.doc_type, c.guideline_title or c.id)
 
             # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
             # directly into the pool — bypassing RRF rank penalty.
@@ -589,6 +596,10 @@ class QwivaRAG:
         db = await get_db()
         s = self._settings
         fts_query = _expand_clinical_abbreviations(query)
+        if fts_query != query:
+            log.info("FTS query expanded: %r → %r", query, fts_query)
+        else:
+            log.info("FTS query: %r", fts_query)
 
         _CPG_SELECT = (
             "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
@@ -690,6 +701,9 @@ class QwivaRAG:
         for c in kept:
             out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
         log.info("Rerank output: %d chunks %s", len(kept), out_counts)
+        for r in results[: self._settings.rerank_top_n]:
+            c = chunks[r["index"]]
+            log.info("  Reranked[%.4f] %s — %s", r.get("relevance_score", 0), c.doc_type, c.guideline_title or c.id)
         return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
