@@ -619,7 +619,18 @@ class QwivaRAG:
             .execute()
         )
 
-        coros: list = [cpg_coro, pubmed_coro]
+        # documents_v2 runs in parallel — covers guidelines not yet in CPG/PubMed tables
+        # (e.g. Kenya MoH malaria, WHO tropical disease guidelines). Drug chunks in
+        # documents_v2 are outvoted in RRF now that CPG + PubMed are primary sources.
+        legacy_coro = (
+            db.table("documents_v2")
+            .select("id, content, metadata")
+            .filter("fts", "wfts", fts_query)
+            .limit(s.retrieval_top_k)
+            .execute()
+        )
+
+        coros: list = [cpg_coro, pubmed_coro, legacy_coro]
         if s.enable_drug_retrieval:
             drug_coro = (
                 db.table(s.drug_chunk_table)
@@ -635,7 +646,7 @@ class QwivaRAG:
 
         results = await asyncio.gather(*coros, return_exceptions=True)
         chunks: list[Chunk] = []
-        cpg_res, pubmed_res = results[0], results[1]
+        cpg_res, pubmed_res, legacy_res = results[0], results[1], results[2]
 
         if isinstance(cpg_res, Exception):
             log.warning("cpg_chunks FTS failed: %s", cpg_res)
@@ -651,11 +662,15 @@ class QwivaRAG:
             log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
             chunks += pubmed_chunks
 
-        # documents_v2 fallback disabled — Qdrant vector search covers CPG data.
-        # Falling back to documents_v2 was returning drug label chunks for clinical queries.
+        if isinstance(legacy_res, Exception):
+            log.warning("documents_v2 FTS failed: %s", legacy_res)
+        else:
+            legacy_chunks = [_row_to_chunk(r) for r in (legacy_res.data or [])]
+            log.info("FTS documents_v2 (legacy): %d results", len(legacy_chunks))
+            chunks += legacy_chunks
 
-        if s.enable_drug_retrieval and len(results) > 2:
-            drug_res = results[2]
+        if s.enable_drug_retrieval and len(results) > 3:
+            drug_res = results[3]
             if isinstance(drug_res, Exception):
                 log.warning("drug FTS failed: %s", drug_res)
             else:
