@@ -1173,11 +1173,30 @@ def _row_to_chunk(row: dict) -> Chunk:
     )
 
 
+def _is_public_url(url: str) -> bool:
+    """Return True only for publicly accessible HTTP(S) URLs with a real hostname."""
+    if not url:
+        return False
+    # Reject internal storage paths: double-slash after scheme, or no real hostname
+    # e.g. "https://storage//corpus-raw/..." or "storage://..." or relative paths
+    if not url.startswith("http"):
+        return False
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        # Must have a hostname with at least one dot (rules out bare "storage")
+        return bool(p.netloc and "." in p.netloc)
+    except Exception:
+        return False
+
+
 def _source_url_from_row(row: dict) -> str:
-    """Build source URL with priority: source_url → doi → iris_url."""
+    """Build source URL with priority: source_url (public only) → doi → iris_url."""
     doi = row.get("doi") or ""
+    raw = row.get("source_url") or ""
+    public = raw if _is_public_url(raw) else ""
     return (
-        row.get("source_url")
+        public
         or (f"https://doi.org/{doi}" if doi else "")
         or row.get("iris_url", "")
     ) or ""
@@ -1480,10 +1499,10 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         if doc_type == "drug" else "Unknown guideline"
     )
     doi = p.get("doi", "")
+    _raw_url = p.get("source_url", "") or p.get("url", "") or ""
     source_url = (
-        p.get("source_url", "")
+        (_raw_url if _is_public_url(_raw_url) else "")
         or (f"https://doi.org/{doi}" if doi else "")
-        or p.get("url", "")
         or p.get("iris_url", "")
     )
     return Chunk(
