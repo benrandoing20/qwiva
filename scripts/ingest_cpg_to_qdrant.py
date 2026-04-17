@@ -161,7 +161,7 @@ async def ingest(limit: int | None = None, clear_old: bool = False) -> None:
     SELECT_COLS = (
         "id, content, embedding, guideline_title, chapter_title, pub_year, "
         "issuing_body, issuing_body_canonical, chunk_index, source_url, doi, "
-        "iris_url, evidence_tier, grade_strength, grade_direction, chunk_type, "
+        "evidence_tier, grade_strength, grade_direction, chunk_type, "
         "is_current_version, document_type, authors, domain, "
         "population_tags, condition_tags, intervention_tags, licence"
     )
