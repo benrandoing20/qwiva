@@ -1,5 +1,11 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
 
 # ---------------------------------------------------------------------------
 # Compatibility patch: litellm passes sdk_integration= to Langfuse.__init__
