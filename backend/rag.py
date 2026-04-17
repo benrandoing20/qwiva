@@ -624,10 +624,15 @@ class QwivaRAG:
         # so "artemether-lumefantrine" becomes "artemether AND NOT lumefantrine" and
         # excludes the very guidelines that discuss both drugs together.
         fts_query = fts_query.replace("-", " ")
+        # Strip English question/function words that PostgreSQL doesn't remove as stopwords
+        # but that aren't in clinical text — e.g. "instead", "used", "vs".
+        # websearch_to_tsquery ANDs ALL remaining terms, so non-clinical words in a
+        # question sentence ("When should X be used instead of Y?") prevent any match.
+        fts_query = _strip_question_words(fts_query)
 
         _fts_t0 = time.perf_counter()
         if fts_query != query:
-            log.info("FTS query expanded: %r → %r", query, fts_query)
+            log.info("FTS query stripped: %r → %r", query, fts_query)
         else:
             log.info("FTS query: %r", fts_query)
 
@@ -1400,6 +1405,34 @@ def _expand_clinical_abbreviations(query: str) -> str:
     for pattern, expansion in _CLINICAL_ABBREVS.items():
         result = re.sub(pattern, expansion, result)
     return result
+
+
+# Words that appear in clinical questions but not in guideline text, and that
+# PostgreSQL's English config does NOT treat as stopwords — so they'd be required
+# by websearch_to_tsquery's AND logic and prevent real matches.
+_FTS_STRIP: frozenset[str] = frozenset({
+    # WH-question words
+    "when", "what", "how", "why", "where", "which", "who", "whom",
+    # Modals (PG may or may not strip these)
+    "should", "would", "could", "can", "may", "might", "must", "shall",
+    # Non-clinical verbs common in questions
+    "used", "use", "given", "give", "prescribed", "prescribe",
+    # Comparison/transition words
+    "instead", "versus", "compared", "comparison",
+    # Short route-of-admin abbreviations (iv, im, sc, po — not useful as FTS terms)
+    "iv", "im", "sc", "po",
+})
+
+
+def _strip_question_words(text: str) -> str:
+    """Remove English question/function words — keep only clinical content terms.
+
+    Words shorter than 3 chars are also dropped (catches route abbreviations like
+    'iv', 'al', 'sc' that would be required by AND logic but absent from some docs).
+    """
+    import re as _re
+    words = _re.sub(r"[?.,!;:()\[\]/]", " ", text.lower()).split()
+    return " ".join(w for w in words if len(w) >= 3 and w not in _FTS_STRIP)
 
 
 def _rrf_merge(
