@@ -124,7 +124,7 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone, sta
         )}
       </div>
 
-      {/* Follow-up suggestions — fade in after done */}
+      {/* DISABLED: Follow-up suggestions — uncomment to re-enable
       <div
         className="transition-opacity duration-500 delay-200"
         style={{ opacity: isDone && suggestions && suggestions.length > 0 ? 1 : 0, pointerEvents: isDone && suggestions && suggestions.length > 0 ? 'auto' : 'none' }}
@@ -148,6 +148,7 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone, sta
           </div>
         )}
       </div>
+      */}
 
       {/* Rating — fade in after streaming done */}
       <div

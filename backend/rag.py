@@ -589,16 +589,22 @@ class QwivaRAG:
         db = await get_db()
         s = self._settings
 
-        _GUIDELINE_SELECT = (
+        _CPG_SELECT = (
+            "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
+            "issuing_body_canonical, chunk_index, source_url, doi, "
+            "evidence_tier, grade_strength, grade_direction, chunk_type, "
+            "is_current_version, document_type"
+        )
+        _PUBMED_SELECT = (
             "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
             "issuing_body_canonical, chunk_index, source_url, doi, iris_url, "
             "evidence_tier, grade_strength, grade_direction, chunk_type, "
-            "is_current_version, document_type"
+            "is_current_version, document_type, authors, journal"
         )
 
         cpg_coro = (
             db.table(s.cpg_chunk_table)
-            .select(_GUIDELINE_SELECT)
+            .select(_CPG_SELECT)
             .filter("fts", "wfts", query)
             .limit(s.retrieval_top_k)
             .execute()
@@ -606,7 +612,7 @@ class QwivaRAG:
 
         pubmed_coro = (
             db.table(s.guideline_chunk_table)
-            .select(_GUIDELINE_SELECT + ", authors, journal")
+            .select(_PUBMED_SELECT)
             .filter("fts", "wfts", query)
             .limit(s.retrieval_top_k)
             .execute()
@@ -644,21 +650,8 @@ class QwivaRAG:
             log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
             chunks += pubmed_chunks
 
-        # Legacy fallback — only if BOTH new tables fail (e.g. fts column not yet created)
-        if isinstance(cpg_res, Exception) and isinstance(pubmed_res, Exception):
-            log.warning("Both new FTS tables failed — falling back to documents_v2")
-            try:
-                legacy_res = await (
-                    db.table(s.legacy_chunk_table)
-                    .select("id, content, metadata")
-                    .filter("fts", "wfts", query)
-                    .limit(s.retrieval_top_k)
-                    .execute()
-                )
-                chunks += [_row_to_chunk(r) for r in (legacy_res.data or [])]
-                log.info("FTS documents_v2 (fallback): %d results", len(chunks))
-            except Exception as exc:
-                log.error("documents_v2 fallback also failed: %s", exc)
+        # documents_v2 fallback disabled — Qdrant vector search covers CPG data.
+        # Falling back to documents_v2 was returning drug label chunks for clinical queries.
 
         if s.enable_drug_retrieval and len(results) > 2:
             drug_res = results[2]

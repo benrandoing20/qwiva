@@ -27,7 +27,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-BATCH_SIZE = 5000
+BATCH_SIZE = 500
 
 
 async def backfill_table(supabase, rpc_fn: str, label: str) -> None:
