@@ -647,7 +647,7 @@ class QwivaRAG:
         cpg_coro = (
             db.table(s.cpg_chunk_table)
             .select(_CPG_SELECT)
-            .filter("fts", "wfts", fts_query)
+            .text_search("fts", fts_query, {"config": "english"})
             .limit(s.retrieval_top_k)
             .execute()
         )
@@ -655,7 +655,7 @@ class QwivaRAG:
         pubmed_coro = (
             db.table(s.guideline_chunk_table)
             .select(_PUBMED_SELECT)
-            .filter("fts", "wfts", fts_query)
+            .text_search("fts", fts_query, {"config": "english"})
             .limit(s.retrieval_top_k)
             .execute()
         )
@@ -668,7 +668,7 @@ class QwivaRAG:
                     "id, content, medicine_name, inn, atc_code, section_key, section_title, "
                     "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
                 )
-                .filter("fts", "wfts", fts_query)
+                .text_search("fts", fts_query, {"config": "english"})
                 .limit(max(1, s.retrieval_top_k // 2))
                 .execute()
             )
