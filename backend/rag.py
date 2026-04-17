@@ -716,8 +716,10 @@ class QwivaRAG:
         response = await self._openai.embeddings.create(
             model=self._settings.embedding_model,
             input=query,
+            dimensions=self._settings.embedding_dimensions,
         )
-        log.info("EMBED [%.0fms]", (time.perf_counter() - t0) * 1000)
+        log.info("EMBED [%.0fms] model=%s dim=%d", (time.perf_counter() - t0) * 1000,
+                 self._settings.embedding_model, self._settings.embedding_dimensions)
         return response.data[0].embedding
 
     # ------------------------------------------------------------------
@@ -1052,7 +1054,8 @@ class QwivaRAG:
 
     @cached_property
     def _openai(self) -> AsyncOpenAI:
-        """Embeddings client — uses OpenAI direct if openai_api_key is set, otherwise NVIDIA hub."""
+        """Embeddings client — text-embedding-3-large requires OpenAI direct (OPENAI_API_KEY).
+        Falls back to NVIDIA hub for legacy compatibility but large model may not be available there."""
         if self._settings.openai_api_key:
             return AsyncOpenAI(api_key=self._settings.openai_api_key)
         return AsyncOpenAI(
