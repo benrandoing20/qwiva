@@ -683,6 +683,14 @@ class QwivaRAG:
     # NVIDIA llama-3.2-nv-rerankqa-1b-v2 max document length (~512 tokens ≈ 1800 chars)
     _RERANK_MAX_CHARS = 1800
 
+    @staticmethod
+    def _truncate_for_rerank(text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        cut = text[:max_chars]
+        last_period = cut.rfind('. ')
+        return cut[:last_period + 1] if last_period > max_chars // 2 else cut
+
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
         if not chunks:
             return chunks
@@ -691,8 +699,8 @@ class QwivaRAG:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
         log.info("RERANK INPUT: %d chunks %s", len(chunks), in_counts)
 
-        # Truncate each document to the model's max length — the most common cause of 400s
-        documents = [c.content[:self._RERANK_MAX_CHARS] for c in chunks]
+        # Truncate at sentence boundary to avoid mid-sentence cuts confusing the reranker
+        documents = [self._truncate_for_rerank(c.content, self._RERANK_MAX_CHARS) for c in chunks]
 
         t0 = time.perf_counter()
         last_exc: Exception | None = None
@@ -718,7 +726,7 @@ class QwivaRAG:
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 if status == 400 and attempt == 0:
                     # Halve document length and retry once
-                    documents = [d[:self._RERANK_MAX_CHARS // 2] for d in documents]
+                    documents = [self._truncate_for_rerank(d, self._RERANK_MAX_CHARS // 2) for d in documents]
                     log.warning("RERANK 400 — retrying with shorter documents (%d chars)", self._RERANK_MAX_CHARS // 2)
                     continue
                 if status in (429, 500, 502, 503, 504):
