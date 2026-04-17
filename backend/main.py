@@ -1,5 +1,11 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
 
 # ---------------------------------------------------------------------------
 # Compatibility patch: litellm passes sdk_integration= to Langfuse.__init__
@@ -329,7 +335,7 @@ async def search_stream(
                 yield f"event: title\ndata: {_json.dumps({'conversation_id': conversation_id, 'title': title})}\n\n"
 
             # Classify: guideline lookup needed, or conversational reply?
-            # Heuristics handle obvious cases (greetings, ack) without an LLM call.
+            # Also extracts key clinical terms for FTS in the same LLM call.
             mode = await rag.classify(body.query, history)
 
             # Stream response — both generators yield SSE-formatted strings
@@ -341,7 +347,6 @@ async def search_stream(
             generator = (
                 rag.stream_chat(body.query, user.user_id, history)
                 if mode == "chat"
-                # Pass pre-computed embedding so stream_search skips its own embed call
                 else rag.stream_search(body.query, user.user_id, history, precomputed_embedding=embedding)
             )
 
