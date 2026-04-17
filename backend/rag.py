@@ -644,21 +644,18 @@ class QwivaRAG:
             "is_current_version, document_type, authors, journal"
         )
 
-        cpg_coro = (
-            db.table(s.cpg_chunk_table)
-            .select(_CPG_SELECT)
-            .filter("fts", "wfts(english)", fts_query)
-            .limit(s.retrieval_top_k)
-            .execute()
-        )
+        # Use RPC functions — PostgREST table-filter wfts operator consistently
+        # returns 0 results for tsvector columns due to schema cache/config mismatch.
+        # RPC bypasses this and calls websearch_to_tsquery('english', ...) directly.
+        cpg_coro = db.rpc(
+            "search_cpg_fts",
+            {"query_text": fts_query, "match_count": s.retrieval_top_k},
+        ).execute()
 
-        pubmed_coro = (
-            db.table(s.guideline_chunk_table)
-            .select(_PUBMED_SELECT)
-            .filter("fts", "wfts(english)", fts_query)
-            .limit(s.retrieval_top_k)
-            .execute()
-        )
+        pubmed_coro = db.rpc(
+            "search_pubmed_fts",
+            {"query_text": fts_query, "match_count": s.retrieval_top_k},
+        ).execute()
 
         coros: list = [cpg_coro, pubmed_coro]
         if s.enable_drug_retrieval:
@@ -668,7 +665,7 @@ class QwivaRAG:
                     "id, content, medicine_name, inn, atc_code, section_key, section_title, "
                     "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
                 )
-                .filter("fts", "wfts(english)", fts_query)
+                .filter("fts", "wfts", fts_query)
                 .limit(max(1, s.retrieval_top_k // 2))
                 .execute()
             )
