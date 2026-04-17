@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
 
     # Search tuning
-    retrieval_top_k: int = 12
+    retrieval_top_k: int = 25
     rerank_top_n: int = 7
     rrf_k: int = 60
     dense_weight: float = 0.6   # must sum to 1.0 with sparse_weight
