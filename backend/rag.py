@@ -301,6 +301,7 @@ class QwivaRAG:
         user_id: str,
         history: list[dict] | None = None,
         precomputed_embedding: list[float] | None = None,
+        fts_terms: str = "",
     ) -> AsyncGenerator[str, None]:
         """
         Streaming search. Yields raw SSE-formatted strings.
@@ -354,7 +355,7 @@ class QwivaRAG:
 
         # --- full pipeline on cache miss ---
         _ts = time.perf_counter()
-        top_chunks = await self._hybrid_search(effective_query, embedding)
+        top_chunks = await self._hybrid_search(effective_query, embedding, fts_terms=fts_terms)
         log.info("LATENCY hybrid_search total: %.3fs", time.perf_counter() - _ts)
 
         yield _sse("status", {"message": "Ranking results…"})
@@ -402,12 +403,12 @@ class QwivaRAG:
     # Retrieval
     # ------------------------------------------------------------------
 
-    async def _hybrid_search(self, query: str, embedding: list[float]) -> list[Chunk]:
+    async def _hybrid_search(self, query: str, embedding: list[float], fts_terms: str = "") -> list[Chunk]:
         """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
         if self._settings.qdrant_url:
             gather_coros: list = [
                 self._qdrant_search(embedding, doc_type="guideline"),
-                self._fts_search(query),
+                self._fts_search(query, fts_terms=fts_terms),
             ]
             if self._settings.enable_drug_retrieval:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
@@ -610,31 +611,27 @@ class QwivaRAG:
         log.info("LATENCY qdrant_search (doc_type=%s): %.3fs → %d hits", doc_type, time.perf_counter() - _ts, len(response.points))
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
-    async def _fts_search(self, query: str) -> list[Chunk]:
+    async def _fts_search(self, query: str, fts_terms: str = "") -> list[Chunk]:
         """Parallel FTS across cpg_chunks + guideline_chunks (PubMed) + drug chunks.
 
         clinical_practice_guideline_chunks — NICE and other CPGs (highest clinical priority)
         guideline_chunks — PubMed articles: SRs, RCTs, trials, research articles
-        Falls back to documents_v2 only if both new tables fail.
         """
         db = await get_db()
         s = self._settings
-        fts_query = _expand_clinical_abbreviations(query)
-        # Replace hyphens with spaces — websearch_to_tsquery treats "-word" as NOT,
-        # so "artemether-lumefantrine" becomes "artemether AND NOT lumefantrine" and
-        # excludes the very guidelines that discuss both drugs together.
-        fts_query = fts_query.replace("-", " ")
-        # Strip English question/function words that PostgreSQL doesn't remove as stopwords
-        # but that aren't in clinical text — e.g. "instead", "used", "vs".
-        # websearch_to_tsquery ANDs ALL remaining terms, so non-clinical words in a
-        # question sentence ("When should X be used instead of Y?") prevent any match.
-        fts_query = _strip_question_words(fts_query)
+
+        # Prefer AI-extracted terms (from classify call) — these are already stripped
+        # of question words and route abbreviations by the LLM.
+        # Fall back to rule-based stripping when fts_terms isn't available.
+        if fts_terms:
+            fts_query = fts_terms.replace("-", " ")
+        else:
+            fts_query = _expand_clinical_abbreviations(query)
+            fts_query = fts_query.replace("-", " ")
+            fts_query = _strip_question_words(fts_query)
 
         _fts_t0 = time.perf_counter()
-        if fts_query != query:
-            log.info("FTS query stripped: %r → %r", query, fts_query)
-        else:
-            log.info("FTS query: %r", fts_query)
+        log.info("FTS query: %r (source=%s)", fts_query, "ai" if fts_terms else "rule")
 
         _CPG_SELECT = (
             "id, content, guideline_title, chapter_title, pub_year, issuing_body, "
@@ -821,8 +818,13 @@ class QwivaRAG:
     # Routing: classify a user message
     # ------------------------------------------------------------------
 
-    async def classify(self, query: str, history: list[dict]) -> str:
-        """Return 'rag' if guideline lookup is needed, 'chat' for conversational reply."""
+    async def classify(self, query: str, history: list[dict]) -> tuple[str, str]:
+        """Return (mode, fts_terms).
+
+        mode: 'rag' (guideline lookup needed) or 'chat' (conversational reply)
+        fts_terms: key medical/clinical terms extracted from the query for FTS,
+                   empty string when mode is 'chat'
+        """
         history_snippet = ""
         if history:
             last_few = history[-6:]
@@ -830,7 +832,6 @@ class QwivaRAG:
                 f"{m['role'].upper()}: {m['content'][:600]}" for m in last_few
             )
 
-        # Surface last assistant message content so classifier knows what was already retrieved
         retrieved_context = ""
         if history:
             last_assistant = next(
@@ -843,34 +844,42 @@ class QwivaRAG:
                 )
 
         prompt = (
-            "Classify this message for a clinical assistant.\n"
-            "Reply with ONLY one word: rag OR chat\n\n"
-            "rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
-            "chat = greeting, thanks, small talk, follow-up question about the previous answer, "
-            "or any question answerable from the conversation history above\n\n"
+            "You are a router for a clinical assistant. Reply with ONLY valid JSON on one line.\n\n"
+            'Format: {"mode": "rag", "terms": "key medical terms"}\n\n'
+            "mode rules:\n"
+            "  rag = needs a NEW clinical guideline lookup (treatments, diagnoses, dosing, protocols not yet discussed)\n"
+            "  chat = greeting, thanks, small talk, follow-up answerable from history, vague presentations\n\n"
             "Vague patient presentations without a specific clinical question "
-            "(e.g. \"my patient is unwell\", \"I have a patient with fever\") → chat, "
-            "so the assistant can ask what specific information is needed.\n\n"
-            "A follow-up that introduces a NEW drug, dose, protocol, or clinical scenario "
-            "not yet discussed in the conversation → rag, even if phrased as a follow-up.\n\n"
-            "IMPORTANT: If the content already retrieved (shown below) contains the information "
-            "needed to answer the current message, classify as chat — do NOT trigger another RAG lookup.\n\n"
+            '(e.g. "my patient is unwell") → chat\n'
+            "A follow-up introducing a NEW drug, dose, or clinical scenario not yet discussed → rag\n"
+            "IMPORTANT: If content already retrieved (below) covers the question → chat\n\n"
+            "terms rules:\n"
+            "  Extract only drug names, conditions, procedures, and clinical concepts.\n"
+            "  Omit: question words (when/what/how/why), verbs (used/given/treat), "
+            "prepositions (instead/versus/compared), route abbreviations (IV/IM/SC/PO).\n"
+            "  Leave empty string if mode is chat.\n\n"
             + (f"Recent conversation:\n{history_snippet}\n\n" if history_snippet else "")
             + retrieved_context
             + f"Message: {query}"
         )
         try:
+            import json as _json
             resp = await litellm.acompletion(
                 model=self._settings.classify_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=5,
+                max_tokens=60,
                 temperature=0,
                 **self._classify_kwargs,
             )
-            result = resp.choices[0].message.content.strip().lower()
-            return "rag" if "rag" in result else "chat"
-        except Exception:
-            return "rag"  # safe default for a clinical app
+            raw = resp.choices[0].message.content.strip()
+            parsed = _json.loads(raw)
+            mode = "rag" if str(parsed.get("mode", "rag")).lower() == "rag" else "chat"
+            fts_terms = str(parsed.get("terms", "")).strip()
+            log.info("Classify → mode=%s  fts_terms=%r", mode, fts_terms)
+            return mode, fts_terms
+        except Exception as exc:
+            log.warning("Classify failed (%s) — defaulting to rag", exc)
+            return "rag", _strip_question_words(query)
 
     # ------------------------------------------------------------------
     # Follow-up suggestions
