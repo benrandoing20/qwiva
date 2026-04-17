@@ -311,10 +311,17 @@ class QwivaRAG:
         """
         yield _sse("status", {"message": "Searching guidelines…"})
 
+        _pipeline_t0 = time.perf_counter()
+        def _T() -> str:
+            return f"T+{(time.perf_counter() - _pipeline_t0)*1000:.0f}ms"
+        log.info("─── PIPELINE START: %r ───", query[:120])
+
         # Expand short follow-ups ("yes", "Both") into a full clinical question
         # so the vector store has something meaningful to search against.
         # _expand_query is a no-op when query is already ≥7 words or history is empty.
         effective_query = await self._expand_query(query, history or [])
+        if effective_query != query:
+            log.info("%s │ EXPAND_QUERY: %r → %r", _T(), query[:80], effective_query[:80])
 
         # Accept pre-computed embedding from main.py (saves one embed round-trip).
         # Re-embed when the query was expanded — the original embedding would be useless.
@@ -322,6 +329,7 @@ class QwivaRAG:
             embedding = await self._embed(effective_query)
         else:
             embedding = precomputed_embedding or await self._embed(query)
+        log.info("%s │ EMBED done", _T())
 
         # --- semantic cache check ---
         # Skip cache when conversation history is present: a follow-up question
@@ -329,6 +337,7 @@ class QwivaRAG:
         # reflect the current conversation context rather than a cached response.
         cached = self._cache.lookup(embedding) if not history else None
         if cached:
+            log.info("%s │ CACHE HIT — skipping retrieval", _T())
             yield _sse("citations", CitationsPayload(
                 citations=cached.citations,
                 evidence_grade=cached.evidence_grade,
@@ -343,9 +352,11 @@ class QwivaRAG:
 
         # --- full pipeline on cache miss ---
         top_chunks = await self._hybrid_search(effective_query, embedding)
+        log.info("%s │ RETRIEVAL done: %d candidates", _T(), len(top_chunks))
 
         yield _sse("status", {"message": "Ranking results…"})
         chunks = await self._rerank(effective_query, top_chunks)
+        log.info("%s │ RERANK done: %d final chunks", _T(), len(chunks))
 
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
@@ -353,12 +364,19 @@ class QwivaRAG:
         yield _sse("citations", citations_payload.model_dump())
 
         yield _sse("status", {"message": "Generating response…"})
+        _gen_t0 = time.perf_counter()
         answer_parts: list[str] = []
         async for token in self._generate_stream(effective_query, chunks, user_id=user_id, history=history):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
         full_answer = "".join(answer_parts)
+        _total_ms = (time.perf_counter() - _pipeline_t0) * 1000
+        _gen_ms = (time.perf_counter() - _gen_t0) * 1000
+        log.info(
+            "─── PIPELINE DONE: total=%.0fms  generation=%.0fms  tokens=%d  citations=%d ───",
+            _total_ms, _gen_ms, len(answer_parts), len(citations),
+        )
 
         # Store in cache for future identical/similar queries
         self._cache.store(
@@ -391,24 +409,27 @@ class QwivaRAG:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
                 gather_coros.append(self._drug_direct_lookup(query))
 
+            t0 = time.perf_counter()
             gather_results = await asyncio.gather(*gather_coros)
+            retrieval_ms = (time.perf_counter() - t0) * 1000
+
             vector_chunks: list[Chunk] = gather_results[0]
             fts_chunks: list[Chunk] = gather_results[1]
             drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
             drug_direct_chunks: list[Chunk] = gather_results[3] if self._settings.enable_drug_retrieval else []
 
-            doc_type_counts = {}
-            for c in vector_chunks:
-                doc_type_counts[c.doc_type] = doc_type_counts.get(c.doc_type, 0) + 1
             log.info(
-                "Retrieval: Qdrant=%d %s  FTS=%d  DrugQdrant=%d  DrugDirect=%d",
-                len(vector_chunks), doc_type_counts, len(fts_chunks),
+                "RETRIEVAL [%.0fms]: qdrant=%d  fts=%d  drug_qdrant=%d  drug_direct=%d",
+                retrieval_ms, len(vector_chunks), len(fts_chunks),
                 len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
             merged = _rrf_merge(
                 vector_chunks, fts_chunks, self._settings.rrf_k, self._settings.retrieval_top_k
             )
-            log.info("After RRF: %d chunks", len(merged))
+            log.info("RRF MERGE: %d → %d chunks (k=%d)", len(vector_chunks) + len(fts_chunks), len(merged), self._settings.rrf_k)
+            for i, c in enumerate(merged[:10], 1):
+                snippet = c.content[:150].replace("\n", " ")
+                log.info("  [%d] %s | %s | chunk=%d\n        ↳ %s", i, c.doc_type, c.guideline_title[:65], c.chunk_index, snippet)
 
             # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
             # directly into the pool — bypassing RRF rank penalty.
@@ -548,7 +569,9 @@ class QwivaRAG:
             except Exception as exc:
                 log.warning("Drug direct lookup failed for %s: %s", name, exc)
 
-        log.info("Drug direct lookup: %d chunks for names %s", len(chunks), matched_names)
+        log.info("DRUG DIRECT: %d chunks for %s", len(chunks), matched_names)
+        for i, c in enumerate(chunks[:4], 1):
+            log.info("  [%d] %s | section=%s", i, c.guideline_title[:65], c.section_key)
         return chunks
 
     async def _qdrant_search(
@@ -567,14 +590,24 @@ class QwivaRAG:
             )
         query_filter = Filter(must=conditions) if conditions else None
 
+        t0 = time.perf_counter()
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
             query_filter=query_filter,
             limit=self._settings.retrieval_top_k,
             with_payload=True,
+            with_vectors=False,
         )
-        return [_qdrant_hit_to_chunk(r) for r in response.points]
+        chunks = [_qdrant_hit_to_chunk(r) for r in response.points]
+        label = f"doc_type={doc_type}" if doc_type else "all"
+        log.info("QDRANT [%.0fms] %s: %d hits", (time.perf_counter() - t0) * 1000, label, len(chunks))
+        for i, c in enumerate(chunks[:5], 1):
+            score = getattr(response.points[i - 1], "score", None)
+            score_str = f"  score={score:.3f}" if score is not None else ""
+            snippet = c.content[:200].replace("\n", " ")
+            log.info("  [%d] %s | %s | chunk=%d%s\n        ↳ %s", i, c.doc_type, c.guideline_title[:65], c.chunk_index, score_str, snippet)
+        return chunks
 
     async def _fts_search(self, query: str) -> list[Chunk]:
         """Parallel FTS across clinical_practice_guideline_chunks + guideline_chunks (PubMed) + drug chunks.
@@ -586,7 +619,7 @@ class QwivaRAG:
         s = self._settings
 
         fts_query = _strip_question_words(_expand_clinical_abbreviations(query).replace("-", " "))
-        log.info("FTS query: %r", fts_query)
+        log.info("FTS query: %r  (raw: %r)", fts_query, query[:100])
 
         cpg_coro = db.rpc("search_cpg_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
         pubmed_coro = db.rpc("search_pubmed_fts", {"query_text": fts_query, "match_count": s.retrieval_top_k}).execute()
@@ -605,33 +638,44 @@ class QwivaRAG:
             )
             coros.append(drug_coro)
 
+        t0 = time.perf_counter()
         results = await asyncio.gather(*coros, return_exceptions=True)
+        elapsed = (time.perf_counter() - t0) * 1000
 
         chunks: list[Chunk] = []
 
         cpg_res, pubmed_res = results[0], results[1]
         if isinstance(cpg_res, Exception):
-            log.warning("search_cpg_fts failed: %s", cpg_res)
+            log.warning("FTS CPG failed: %s", cpg_res)
         else:
             cpg_chunks = [_guideline_row_to_chunk(r) for r in (cpg_res.data or [])]
-            log.info("FTS clinical_practice_guideline_chunks: %d results", len(cpg_chunks))
+            log.info("FTS CPG [%.0fms]: %d hits", elapsed, len(cpg_chunks))
+            for i, c in enumerate(cpg_chunks[:5], 1):
+                snippet = c.content[:200].replace("\n", " ")
+                log.info("  [%d] %s | chunk=%d | %s\n        ↳ %s", i, c.guideline_title[:65], c.chunk_index, c.cascading_path[:40] or "—", snippet)
             chunks += cpg_chunks
 
         if isinstance(pubmed_res, Exception):
-            log.warning("search_pubmed_fts failed: %s", pubmed_res)
+            log.warning("FTS PubMed failed: %s", pubmed_res)
         else:
             pubmed_chunks = [_guideline_row_to_chunk(r) for r in (pubmed_res.data or [])]
-            log.info("FTS guideline_chunks (PubMed): %d results", len(pubmed_chunks))
+            log.info("FTS PubMed [%.0fms]: %d hits", elapsed, len(pubmed_chunks))
+            for i, c in enumerate(pubmed_chunks[:5], 1):
+                snippet = c.content[:200].replace("\n", " ")
+                log.info("  [%d] %s | chunk=%d | %s\n        ↳ %s", i, c.guideline_title[:65], c.chunk_index, c.cascading_path[:40] or "—", snippet)
             chunks += pubmed_chunks
 
-        # Drug results (optional)
-        if s.enable_drug_retrieval and len(results) > 1:
-            drug_res = results[1]
+        # Drug results (optional) — index 2 when drug retrieval is enabled
+        if s.enable_drug_retrieval and len(results) > 2:
+            drug_res = results[2]
             if isinstance(drug_res, Exception):
-                log.warning("drug FTS failed (%s)", drug_res)
+                log.warning("FTS drug failed: %s", drug_res)
             else:
                 d_chunks = [_drug_row_to_chunk(r) for r in (drug_res.data or [])]
-                log.info("FTS drug_label_chunks: %d results", len(d_chunks))
+                log.info("FTS drug [%.0fms]: %d hits", elapsed, len(d_chunks))
+                for i, c in enumerate(d_chunks[:3], 1):
+                    snippet = c.content[:200].replace("\n", " ")
+                    log.info("  [%d] %s | section=%s\n        ↳ %s", i, c.guideline_title[:65], c.section_key, snippet)
                 chunks += d_chunks
 
         return chunks
@@ -642,7 +686,9 @@ class QwivaRAG:
         in_counts: dict[str, int] = {}
         for c in chunks:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
-        log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
+        log.info("RERANK INPUT: %d chunks %s", len(chunks), in_counts)
+
+        t0 = time.perf_counter()
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -657,13 +703,21 @@ class QwivaRAG:
             },
         )
         response.raise_for_status()
+        rerank_ms = (time.perf_counter() - t0) * 1000
+
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
         kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
         out_counts: dict[str, int] = {}
         for c in kept:
             out_counts[c.doc_type] = out_counts.get(c.doc_type, 0) + 1
-        log.info("Rerank output: %d chunks %s", len(kept), out_counts)
+        log.info("RERANK OUTPUT [%.0fms]: %d → %d chunks %s", rerank_ms, len(chunks), len(kept), out_counts)
+        for i, (r, c) in enumerate(zip(results[: self._settings.rerank_top_n], kept), 1):
+            score = r.get("relevance_score", 0.0)
+            snippet = c.content[:250].replace("\n", " ")
+            log.info("  [%d] score=%.4f | %s | %s | chunk=%d | %s\n        ↳ %s",
+                     i, score, c.doc_type, c.guideline_title[:60], c.chunk_index,
+                     c.cascading_path[:40] or "—", snippet)
         return kept
 
     async def _retrieve_and_rerank(self, query: str) -> list[Chunk]:
@@ -672,10 +726,14 @@ class QwivaRAG:
         return await self._rerank(query, top_chunks)
 
     async def _embed(self, query: str) -> list[float]:
+        t0 = time.perf_counter()
         response = await self._openai.embeddings.create(
             model=self._settings.embedding_model,
             input=query,
+            dimensions=self._settings.embedding_dimensions,
         )
+        log.info("EMBED [%.0fms] model=%s dim=%d", (time.perf_counter() - t0) * 1000,
+                 self._settings.embedding_model, self._settings.embedding_dimensions)
         return response.data[0].embedding
 
     # ------------------------------------------------------------------
@@ -780,6 +838,7 @@ class QwivaRAG:
             + retrieved_context
             + f"Message: {query}"
         )
+        t0 = time.perf_counter()
         try:
             resp = await litellm.acompletion(
                 model=self._settings.classify_model,
@@ -789,8 +848,11 @@ class QwivaRAG:
                 **self._classify_kwargs,
             )
             result = resp.choices[0].message.content.strip().lower()
-            return "rag" if "rag" in result else "chat"
-        except Exception:
+            mode = "rag" if "rag" in result else "chat"
+            log.info("CLASSIFY [%.0fms]: mode=%s  query=%r", (time.perf_counter() - t0) * 1000, mode, query[:100])
+            return mode
+        except Exception as exc:
+            log.warning("CLASSIFY failed (%.0fms): %s — defaulting to rag", (time.perf_counter() - t0) * 1000, exc)
             return "rag"  # safe default for a clinical app
 
     # ------------------------------------------------------------------
@@ -1006,13 +1068,14 @@ class QwivaRAG:
 
     @cached_property
     def _openai(self) -> AsyncOpenAI:
-        """Embeddings client — uses OpenAI direct if openai_api_key is set, otherwise NVIDIA hub."""
-        if self._settings.openai_api_key:
-            return AsyncOpenAI(api_key=self._settings.openai_api_key)
-        return AsyncOpenAI(
-            api_key=self._settings.nvidia_api_key,
-            base_url=self._settings.nvidia_api_base,
-        )
+        """Embeddings client — always uses OpenAI direct (OPENAI_API_KEY required).
+        text-embedding-3-large is not available on the NVIDIA hub."""
+        if not self._settings.openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is required for text-embedding-3-large embeddings. "
+                "Set it in your environment / Render secrets."
+            )
+        return AsyncOpenAI(api_key=self._settings.openai_api_key)
 
     @cached_property
     def _http(self) -> httpx.AsyncClient:
@@ -1260,6 +1323,7 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
                 section=section,
                 year=chunk.year,
                 publisher=chunk.publisher,
+                doc_type=chunk.doc_type,
                 excerpt=chunk.content[:_EXCERPT_CHARS],
                 source_url=chunk.source_url,
                 source_content=chunk.content,
@@ -1379,6 +1443,11 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
     """Maps a Qdrant point to Chunk, reading both legacy and new payload fields."""
     p = hit.payload or {}
     doc_type = p.get("doc_type", "legacy")
+    source_url = p.get("source_url", "") or p.get("url", "") or p.get("iris_url", "")
+    # Stale documents_v2 entries sometimes have doc_type="drug" but a PMC/PubMed source_url —
+    # those are research articles, not drug labels. Correct the doc_type.
+    if doc_type == "drug" and any(h in source_url for h in ("pmc.ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov")):
+        doc_type = "guideline"
     medicine_name = p.get("medicine_name", "")
     title = p.get("guideline_title", "") or (
         f"{medicine_name} prescribing information ({p.get('source_type', '').upper()})"
@@ -1393,7 +1462,7 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         year=str(p.get("year", "") or p.get("pub_year", "") or ""),
         publisher=p.get("publisher", "") or p.get("issuing_body", "") or p.get("source_type", "").upper(),
         chunk_index=int(p.get("chunk_index", 0)),
-        source_url=p.get("source_url", "") or p.get("url", "") or p.get("iris_url", ""),
+        source_url=source_url,
         evidence_tier=int(p.get("evidence_tier") or 0),
         grade_strength=p.get("grade_strength", ""),
         grade_direction=p.get("grade_direction", ""),

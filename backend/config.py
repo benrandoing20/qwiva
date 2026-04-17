@@ -16,9 +16,12 @@ class Settings(BaseSettings):
     nvidia_api_key: str
     nvidia_api_base: str = "https://inference-api.nvidia.com/v1/"
 
-    # Embeddings — NVIDIA hub hosts text-embedding-3-small directly (no routing overhead)
-    openai_api_key: str = ""  # set to use OpenAI direct instead
-    embedding_model: str = "azure/openai/text-embedding-3-small"
+    # Embeddings — must match the model used during ingestion (pdf-pipeline + pmc_oa_ingest)
+    # Both ingestion pipelines use text-embedding-3-large at dimensions=1536 (Matryoshka).
+    # Using a different model here produces incompatible vectors → garbage vector search results.
+    openai_api_key: str = ""  # required for text-embedding-3-large (OpenAI direct)
+    embedding_model: str = "text-embedding-3-large"
+    embedding_dimensions: int = 1536  # Matryoshka truncation — matches ingestion pipelines
 
     # Main generation — Anthropic direct removes NVIDIA→Bedrock overhead (~300ms TTFT)
     # and enables prompt caching. Switch between haiku (fast) and sonnet (quality).

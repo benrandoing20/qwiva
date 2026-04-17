@@ -20,6 +20,7 @@ class Citation(BaseModel):
     section: str  # from cascading_path
     year: str
     publisher: str
+    doc_type: str = "guideline"  # "guideline" | "drug" | "legacy"
     excerpt: str = ""  # short display excerpt shown in UI (≤400 chars)
     source_url: str = ""  # direct URL to the guideline document, if available in metadata
     source_content: str = ""  # full retrieved chunk text — used to ground follow-up questions in history

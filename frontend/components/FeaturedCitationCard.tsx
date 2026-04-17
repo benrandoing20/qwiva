@@ -3,7 +3,7 @@
 import type { Citation } from '@/types'
 
 function docType(c: Citation): 'drug' | 'guideline' {
-  return c.guideline_title?.toLowerCase().includes('prescribing information') ? 'drug' : 'guideline'
+  return c.doc_type === 'drug' ? 'drug' : 'guideline'
 }
 
 function badge(pub: string, year: string): string {
