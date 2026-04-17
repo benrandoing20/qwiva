@@ -307,7 +307,7 @@ export default function HomePage() {
     // Track the real ids resolved from SSE
     let realConversationId: string | null = activeConversationId
     let realUserMessageId: string | null = null
-    let pendingSuggestions: string[] = []
+    // let pendingSuggestions: string[] = []  // DISABLED: follow-up suggestions
     let pendingCitationCount = 0
     let pendingEvidenceGrade: string | null = null
 
@@ -373,8 +373,8 @@ export default function HomePage() {
         } else if (event.event === 'token') {
           tokenBuffer += event.data.token
           if (!rafId) rafId = requestAnimationFrame(flushTokens)
-        } else if (event.event === 'suggestions') {
-          pendingSuggestions = event.data.suggestions
+        // } else if (event.event === 'suggestions') {  // DISABLED: follow-up suggestions
+        //   pendingSuggestions = event.data.suggestions
         } else if (event.event === 'done') {
           // Cancel any pending rAF flush and fold buffered tokens directly into
           // this update — single atomic render, no double-flash.
@@ -395,14 +395,14 @@ export default function HomePage() {
                 content: answer,
                 citations,
                 isStreaming: false,
-                suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
+                // suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,  // DISABLED
               }
             }),
           )
           // Capture real DB id for use as parent_message_id on next turn
           posthog.capture('answer_received', {
             citation_count: pendingCitationCount,
-            has_suggestions: pendingSuggestions.length > 0,
+            // has_suggestions: pendingSuggestions.length > 0,  // DISABLED
             evidence_grade: pendingEvidenceGrade,
           })
           lastAssistantIdRef.current = event.data.assistant_message_id
