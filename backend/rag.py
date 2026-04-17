@@ -1323,6 +1323,7 @@ def _build_citations(chunks: list[Chunk]) -> list[Citation]:
                 section=section,
                 year=chunk.year,
                 publisher=chunk.publisher,
+                doc_type=chunk.doc_type,
                 excerpt=chunk.content[:_EXCERPT_CHARS],
                 source_url=chunk.source_url,
                 source_content=chunk.content,
@@ -1442,6 +1443,11 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
     """Maps a Qdrant point to Chunk, reading both legacy and new payload fields."""
     p = hit.payload or {}
     doc_type = p.get("doc_type", "legacy")
+    source_url = p.get("source_url", "") or p.get("url", "") or p.get("iris_url", "")
+    # Stale documents_v2 entries sometimes have doc_type="drug" but a PMC/PubMed source_url —
+    # those are research articles, not drug labels. Correct the doc_type.
+    if doc_type == "drug" and any(h in source_url for h in ("pmc.ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov")):
+        doc_type = "guideline"
     medicine_name = p.get("medicine_name", "")
     title = p.get("guideline_title", "") or (
         f"{medicine_name} prescribing information ({p.get('source_type', '').upper()})"
@@ -1456,7 +1462,7 @@ def _qdrant_hit_to_chunk(hit) -> Chunk:
         year=str(p.get("year", "") or p.get("pub_year", "") or ""),
         publisher=p.get("publisher", "") or p.get("issuing_body", "") or p.get("source_type", "").upper(),
         chunk_index=int(p.get("chunk_index", 0)),
-        source_url=p.get("source_url", "") or p.get("url", "") or p.get("iris_url", ""),
+        source_url=source_url,
         evidence_tier=int(p.get("evidence_tier") or 0),
         grade_strength=p.get("grade_strength", ""),
         grade_direction=p.get("grade_direction", ""),

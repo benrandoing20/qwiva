@@ -4,6 +4,7 @@ export interface Citation {
   section: string
   year: string
   publisher: string
+  doc_type?: string        // "guideline" | "drug" | "legacy"
   source_url?: string
   excerpt?: string         // 400-char display excerpt
   source_content?: string  // full retrieved chunk — shown in hover tooltip
