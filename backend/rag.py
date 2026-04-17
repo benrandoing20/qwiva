@@ -1054,14 +1054,14 @@ class QwivaRAG:
 
     @cached_property
     def _openai(self) -> AsyncOpenAI:
-        """Embeddings client — text-embedding-3-large requires OpenAI direct (OPENAI_API_KEY).
-        Falls back to NVIDIA hub for legacy compatibility but large model may not be available there."""
-        if self._settings.openai_api_key:
-            return AsyncOpenAI(api_key=self._settings.openai_api_key)
-        return AsyncOpenAI(
-            api_key=self._settings.nvidia_api_key,
-            base_url=self._settings.nvidia_api_base,
-        )
+        """Embeddings client — always uses OpenAI direct (OPENAI_API_KEY required).
+        text-embedding-3-large is not available on the NVIDIA hub."""
+        if not self._settings.openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is required for text-embedding-3-large embeddings. "
+                "Set it in your environment / Render secrets."
+            )
+        return AsyncOpenAI(api_key=self._settings.openai_api_key)
 
     @cached_property
     def _http(self) -> httpx.AsyncClient:
