@@ -312,19 +312,26 @@ class QwivaRAG:
           4. event: done
           5. event: suggestions  (3 follow-up question chips)
         """
+        import time as _time
+        _t0 = _time.perf_counter()
+
         yield _sse("status", {"message": "Searching guidelines…"})
 
         # Expand short follow-ups ("yes", "Both") into a full clinical question
         # so the vector store has something meaningful to search against.
         # _expand_query is a no-op when query is already ≥7 words or history is empty.
+        _ts = _time.perf_counter()
         effective_query = await self._expand_query(query, history or [])
+        log.info("LATENCY expand_query: %.3fs", _time.perf_counter() - _ts)
 
         # Accept pre-computed embedding from main.py (saves one embed round-trip).
         # Re-embed when the query was expanded — the original embedding would be useless.
+        _ts = _time.perf_counter()
         if effective_query != query:
             embedding = await self._embed(effective_query)
         else:
             embedding = precomputed_embedding or await self._embed(query)
+        log.info("LATENCY embed: %.3fs", _time.perf_counter() - _ts)
 
         # --- semantic cache check ---
         # Skip cache when conversation history is present: a follow-up question
@@ -342,13 +349,18 @@ class QwivaRAG:
             for i in range(0, len(cached.answer), step):
                 yield _sse("token", {"token": cached.answer[i:i + step]})
             yield _sse("done", {})
+            log.info("LATENCY total (cache hit): %.3fs", _time.perf_counter() - _t0)
             return
 
         # --- full pipeline on cache miss ---
+        _ts = _time.perf_counter()
         top_chunks = await self._hybrid_search(effective_query, embedding)
+        log.info("LATENCY hybrid_search total: %.3fs", _time.perf_counter() - _ts)
 
         yield _sse("status", {"message": "Ranking results…"})
+        _ts = _time.perf_counter()
         chunks = await self._rerank(effective_query, top_chunks)
+        log.info("LATENCY rerank: %.3fs", _time.perf_counter() - _ts)
 
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
@@ -357,11 +369,18 @@ class QwivaRAG:
 
         yield _sse("status", {"message": "Generating response…"})
         answer_parts: list[str] = []
+        _first_token = True
+        _ts_gen = _time.perf_counter()
         async for token in self._generate_stream(effective_query, chunks, user_id=user_id, history=history):
+            if _first_token:
+                log.info("LATENCY generation first token: %.3fs", _time.perf_counter() - _ts_gen)
+                _first_token = False
             answer_parts.append(token)
             yield _sse("token", {"token": token})
 
         full_answer = "".join(answer_parts)
+        log.info("LATENCY generation total: %.3fs", _time.perf_counter() - _ts_gen)
+        log.info("LATENCY pipeline total: %.3fs", _time.perf_counter() - _t0)
 
         # Store in cache for future identical/similar queries
         self._cache.store(
@@ -394,7 +413,9 @@ class QwivaRAG:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
                 gather_coros.append(self._drug_direct_lookup(query))
 
+            _ts = _time.perf_counter()
             gather_results = await asyncio.gather(*gather_coros)
+            log.info("LATENCY parallel_gather (qdrant+fts+drug): %.3fs", _time.perf_counter() - _ts)
             vector_chunks: list[Chunk] = gather_results[0]
             fts_chunks: list[Chunk] = gather_results[1]
             drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
@@ -577,6 +598,8 @@ class QwivaRAG:
             )
         query_filter = Filter(must=conditions) if conditions else None
 
+        import time as _time
+        _ts = _time.perf_counter()
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
@@ -584,6 +607,7 @@ class QwivaRAG:
             limit=self._settings.retrieval_top_k,
             with_payload=True,
         )
+        log.info("LATENCY qdrant_search (doc_type=%s): %.3fs → %d hits", doc_type, _time.perf_counter() - _ts, len(response.points))
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
     async def _fts_search(self, query: str) -> list[Chunk]:
@@ -596,6 +620,8 @@ class QwivaRAG:
         db = await get_db()
         s = self._settings
         fts_query = _expand_clinical_abbreviations(query)
+        import time as _time
+        _fts_t0 = _time.perf_counter()
         if fts_query != query:
             log.info("FTS query expanded: %r → %r", query, fts_query)
         else:
@@ -644,7 +670,10 @@ class QwivaRAG:
             )
             coros.append(drug_coro)
 
+        _ts = _time.perf_counter()
         results = await asyncio.gather(*coros, return_exceptions=True)
+        log.info("LATENCY fts_parallel_gather: %.3fs", _time.perf_counter() - _ts)
+
         chunks: list[Chunk] = []
         cpg_res, pubmed_res = results[0], results[1]
 
@@ -671,15 +700,18 @@ class QwivaRAG:
                 log.info("FTS drug_label_chunks: %d results", len(d_chunks))
                 chunks += d_chunks
 
+        log.info("LATENCY fts_search total: %.3fs → %d chunks", _time.perf_counter() - _fts_t0, len(chunks))
         return chunks
 
     async def _rerank(self, query: str, chunks: list[Chunk]) -> list[Chunk]:
+        import time as _time
         if not chunks:
             return chunks
         in_counts: dict[str, int] = {}
         for c in chunks:
             in_counts[c.doc_type] = in_counts.get(c.doc_type, 0) + 1
         log.info("Rerank input: %d chunks %s", len(chunks), in_counts)
+        _ts = _time.perf_counter()
         response = await self._http.post(
             self._settings.rerank_base_url,
             headers={
@@ -694,6 +726,7 @@ class QwivaRAG:
             },
         )
         response.raise_for_status()
+        log.info("LATENCY rerank_http: %.3fs", _time.perf_counter() - _ts)
         results = response.json()["results"]
         # Slice to top_n — some reranker endpoints return all docs sorted rather than truncating
         kept = [chunks[r["index"]] for r in results[: self._settings.rerank_top_n]]
