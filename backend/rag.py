@@ -407,7 +407,7 @@ class QwivaRAG:
         """Parallel vector (Qdrant) + FTS (Supabase) merged with RRF."""
         if self._settings.qdrant_url:
             gather_coros: list = [
-                self._qdrant_search(embedding, doc_type="guideline"),
+                self._qdrant_search(embedding, exclude_doc_type="drug"),
                 self._fts_search(query, fts_terms=fts_terms),
             ]
             if self._settings.enable_drug_retrieval:
@@ -584,20 +584,33 @@ class QwivaRAG:
         return chunks
 
     async def _qdrant_search(
-        self, embedding: list[float], doc_type: str | None = None
+        self, embedding: list[float], doc_type: str | None = None, exclude_doc_type: str | None = None
     ) -> list[Chunk]:
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        conditions = []
+        must: list = []
+        must_not: list = []
+
         if self._settings.enable_version_filter:
-            conditions.append(
+            must.append(
                 FieldCondition(key="is_current_version", match=MatchValue(value=True))
             )
         if doc_type:
-            conditions.append(
+            must.append(
                 FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
             )
-        query_filter = Filter(must=conditions) if conditions else None
+        if exclude_doc_type:
+            must_not.append(
+                FieldCondition(key="doc_type", match=MatchValue(value=exclude_doc_type))
+            )
+
+        if must or must_not:
+            query_filter = Filter(
+                must=must if must else None,
+                must_not=must_not if must_not else None,
+            )
+        else:
+            query_filter = None
 
         
         _ts = time.perf_counter()
@@ -608,7 +621,7 @@ class QwivaRAG:
             limit=self._settings.retrieval_top_k,
             with_payload=True,
         )
-        log.info("LATENCY qdrant_search (doc_type=%s): %.3fs → %d hits", doc_type, time.perf_counter() - _ts, len(response.points))
+        log.info("LATENCY qdrant_search (doc_type=%s exclude=%s): %.3fs → %d hits", doc_type, exclude_doc_type, time.perf_counter() - _ts, len(response.points))
         return [_qdrant_hit_to_chunk(r) for r in response.points]
 
     async def _fts_search(self, query: str, fts_terms: str = "") -> list[Chunk]:
