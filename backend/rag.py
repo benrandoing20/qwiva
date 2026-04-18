@@ -502,22 +502,23 @@ class QwivaRAG:
         if not words:
             return []
 
-        # Find distinct medicine_names that match any query word
+        # Phase 1: all name scans in parallel — was 8 sequential round-trips
+        name_coros = [
+            db.table(s.drug_chunk_table)
+            .select("medicine_name")
+            .ilike("medicine_name", f"%{word}%")
+            .limit(3)
+            .execute()
+            for word in words[:8]
+        ]
+        name_results = await asyncio.gather(*name_coros, return_exceptions=True)
         matched_names: set[str] = set()
-        for word in words[:8]:  # cap to avoid too many round-trips
-            try:
-                res = await (
-                    db.table(s.drug_chunk_table)
-                    .select("medicine_name")
-                    .ilike("medicine_name", f"%{word}%")
-                    .limit(3)
-                    .execute()
-                )
-                for r in res.data or []:
-                    if r.get("medicine_name"):
-                        matched_names.add(r["medicine_name"])
-            except Exception:
-                pass
+        for res in name_results:
+            if isinstance(res, Exception):
+                continue
+            for r in res.data or []:
+                if r.get("medicine_name"):
+                    matched_names.add(r["medicine_name"])
 
         if not matched_names:
             return []
@@ -547,27 +548,31 @@ class QwivaRAG:
         # Merge: section_hints first, then remaining PRIORITY_SECTIONS
         ordered_sections = list(dict.fromkeys(section_hints + PRIORITY_SECTIONS))
 
-        chunks: list[Chunk] = []
         select_cols = (
             "id, content, medicine_name, inn, atc_code, section_key, section_title, "
             "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
         )
-        for name in list(matched_names)[:3]:
-            try:
-                res = await (
-                    db.table(s.drug_chunk_table)
-                    .select(select_cols)
-                    .eq("medicine_name", name)
-                    .in_("section_key", ordered_sections[:5])
-                    .limit(4)
-                    .execute()
-                )
-                fetched = [_drug_row_to_chunk(r) for r in (res.data or [])]
-                # Sort by section priority
-                fetched.sort(key=lambda c: ordered_sections.index(c.section_key) if c.section_key in ordered_sections else 99)
-                chunks.extend(fetched)
-            except Exception as exc:
-                log.warning("Drug direct lookup failed for %s: %s", name, exc)
+
+        # Phase 2: all section fetches in parallel — was 3 sequential round-trips
+        fetch_coros = [
+            db.table(s.drug_chunk_table)
+            .select(select_cols)
+            .eq("medicine_name", name)
+            .in_("section_key", ordered_sections[:5])
+            .limit(4)
+            .execute()
+            for name in list(matched_names)[:3]
+        ]
+        fetch_results = await asyncio.gather(*fetch_coros, return_exceptions=True)
+
+        chunks: list[Chunk] = []
+        for res in fetch_results:
+            if isinstance(res, Exception):
+                log.warning("Drug direct lookup section fetch failed: %s", res)
+                continue
+            fetched = [_drug_row_to_chunk(r) for r in (res.data or [])]
+            fetched.sort(key=lambda c: ordered_sections.index(c.section_key) if c.section_key in ordered_sections else 99)
+            chunks.extend(fetched)
 
         log.info("DRUG DIRECT: %d chunks for %s", len(chunks), matched_names)
         for i, c in enumerate(chunks[:4], 1):
@@ -580,6 +585,7 @@ class QwivaRAG:
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         conditions = []
+        must_not: list = []
         if self._settings.enable_version_filter:
             conditions.append(
                 FieldCondition(key="is_current_version", match=MatchValue(value=True))
@@ -588,14 +594,21 @@ class QwivaRAG:
             conditions.append(
                 FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
             )
-        query_filter = Filter(must=conditions) if conditions else None
+        else:
+            # General search: exclude drug chunks — they have a dedicated search path
+            # and consuming guideline slots with drug results degrades recall.
+            must_not.append(FieldCondition(key="doc_type", match=MatchValue(value="drug")))
+
+        query_filter = Filter(must=conditions or [], must_not=must_not or []) if (conditions or must_not) else None
 
         t0 = time.perf_counter()
+        score_threshold = self._settings.qdrant_score_threshold
         response = await self._qdrant.query_points(
             collection_name=self._settings.qdrant_collection,
             query=embedding,
             query_filter=query_filter,
             limit=self._settings.retrieval_top_k,
+            score_threshold=score_threshold,
             with_payload=True,
             with_vectors=False,
         )
@@ -633,7 +646,7 @@ class QwivaRAG:
                     "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
                 )
                 .filter("fts", "wfts", fts_query)
-                .limit(max(1, s.retrieval_top_k // 2))
+                .limit(s.retrieval_top_k)
                 .execute()
             )
             coros.append(drug_coro)
@@ -1313,16 +1326,15 @@ def _expand_clinical_abbreviations(query: str) -> str:
 
 
 def _strip_question_words(text: str) -> str:
-    # Strip punctuation including + (removes patient notation like G2P1+0)
     words = re.sub(r"[?.,!;:()\[\]/+]", " ", text.lower()).split()
-    # Drop stop words, short tokens, pure numbers, and any token containing digits
-    # (catches patient notation like g2p1, g3p2, etc. that never appear in guideline text)
+    # Drop stop words, short tokens, and pure-digit tokens.
+    # Keep alphanumeric clinical tokens like "10mg", "g2p1" — stripping those
+    # was silently discarding the most specific term in dosing queries.
     return " ".join(
         w for w in words
         if len(w) >= 3
         and w not in _FTS_STRIP
         and not w.isdigit()
-        and not re.search(r'\d', w)
     )
 
 
