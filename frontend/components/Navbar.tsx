@@ -49,6 +49,26 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
             Search
           </Link>
           <Link
+            href="/community"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              pathname?.startsWith('/community')
+                ? 'text-brand-text bg-brand-raised'
+                : 'text-brand-muted hover:text-brand-text'
+            }`}
+          >
+            Community
+          </Link>
+          <Link
+            href="/discover"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              pathname === '/discover'
+                ? 'text-brand-text bg-brand-raised'
+                : 'text-brand-muted hover:text-brand-text'
+            }`}
+          >
+            Discover
+          </Link>
+          <Link
             href="/learn"
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
               pathname === '/learn'
@@ -62,9 +82,19 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
       </div>
       <div className="flex items-center gap-1">
         <ThemeToggle />
+        <Link
+          href="/profile/me"
+          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+            pathname?.startsWith('/profile')
+              ? 'text-brand-text bg-brand-raised'
+              : 'text-brand-muted hover:text-brand-text'
+          }`}
+        >
+          Profile
+        </Link>
         <button
           onClick={signOut}
-          className="text-sm text-brand-muted hover:text-brand-text transition-colors"
+          className="text-sm text-brand-muted hover:text-brand-text transition-colors px-3 py-1.5"
         >
           Sign out
         </button>

@@ -106,3 +106,151 @@ class SiblingOut(BaseModel):
 class UserProfile(BaseModel):
     user_id: str
     email: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Social — Profiles
+# ---------------------------------------------------------------------------
+
+
+class PhysicianProfileOut(BaseModel):
+    user_id: str
+    display_name: str
+    specialty: str | None = None
+    subspecialty: str | None = None
+    institution: str | None = None
+    country: str
+    city: str | None = None
+    bio: str | None = None
+    avatar_url: str | None = None
+    years_experience: int | None = None
+    verification_status: str
+    languages: list[str]
+    interests: list[str]
+    onboarding_complete: bool
+    follower_count: int
+    following_count: int
+    post_count: int
+    created_at: str
+    is_following: bool | None = None  # None when viewing own profile
+
+
+class OnboardingRequest(BaseModel):
+    display_name: str
+    specialty: str | None = None
+    subspecialty: str | None = None
+    institution: str | None = None
+    country: str = "Kenya"
+    city: str | None = None
+    bio: str | None = None
+    years_experience: int | None = None
+    medical_license: str | None = None
+    languages: list[str] = []
+    interests: list[str] = []
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = None
+    specialty: str | None = None
+    subspecialty: str | None = None
+    institution: str | None = None
+    country: str | None = None
+    city: str | None = None
+    bio: str | None = None
+    years_experience: int | None = None
+    medical_license: str | None = None
+    languages: list[str] | None = None
+    interests: list[str] | None = None
+    avatar_url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Social — Posts
+# ---------------------------------------------------------------------------
+
+
+class PostOut(BaseModel):
+    id: str
+    author_id: str
+    content: str
+    post_type: str
+    tags: list[str]
+    specialty_tags: list[str]
+    image_urls: list[str]
+    is_anonymous: bool
+    like_count: int
+    comment_count: int
+    view_count: int
+    created_at: str
+    author_name: str
+    author_specialty: str | None = None
+    author_avatar: str | None = None
+    author_country: str | None = None
+    author_verified: str
+    viewer_liked: bool
+    is_following: bool
+
+
+class CreatePostRequest(BaseModel):
+    content: str
+    post_type: str = "question"
+    tags: list[str] = []
+    specialty_tags: list[str] = []
+    is_anonymous: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Social — Comments
+# ---------------------------------------------------------------------------
+
+
+class CommentOut(BaseModel):
+    id: str
+    post_id: str
+    author_id: str
+    parent_comment_id: str | None = None
+    content: str
+    is_anonymous: bool
+    like_count: int
+    created_at: str
+    author_name: str
+    author_specialty: str | None = None
+    author_avatar: str | None = None
+    author_verified: str
+    viewer_liked: bool
+
+
+class CreateCommentRequest(BaseModel):
+    content: str
+    parent_comment_id: str | None = None
+    is_anonymous: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Social — Follows / Discover
+# ---------------------------------------------------------------------------
+
+
+class DiscoverUserOut(BaseModel):
+    user_id: str
+    display_name: str
+    specialty: str | None = None
+    subspecialty: str | None = None
+    institution: str | None = None
+    country: str
+    city: str | None = None
+    bio: str | None = None
+    avatar_url: str | None = None
+    years_experience: int | None = None
+    verification_status: str
+    languages: list[str]
+    interests: list[str]
+    follower_count: int
+    following_count: int
+    post_count: int
+    is_following: bool
+
+
+class LikeResponse(BaseModel):
+    liked: bool
+    like_count: int
