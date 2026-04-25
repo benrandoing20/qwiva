@@ -402,11 +402,7 @@ export default function HomePage() {
           // Capture real DB id for use as parent_message_id on next turn
           posthog.capture('answer_received', {
             citation_count: pendingCitationCount,
-<<<<<<< HEAD
             // has_suggestions: pendingSuggestions.length > 0,  // DISABLED
-=======
-            // has_suggestions: pendingSuggestions.length > 0,
->>>>>>> 09d0b8b (chore: comment out follow-up suggestions feature)
             evidence_grade: pendingEvidenceGrade,
           })
           lastAssistantIdRef.current = event.data.assistant_message_id
