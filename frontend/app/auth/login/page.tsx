@@ -32,12 +32,25 @@ function LoginForm() {
     setLoading(true)
 
     if (mode === 'login') {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
       setLoading(false)
       if (authError) { setError(authError.message); return }
+      // Check if onboarding is complete — redirect new users to onboarding
+      if (data.session) {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('onboarding_complete')
+          .eq('id', data.session.user.id)
+          .maybeSingle()
+        if (!profile?.onboarding_complete) {
+          router.push('/onboarding')
+          return
+        }
+      }
       router.push('/')
     } else {
-      const redirectTo = `${window.location.origin}/auth/callback`
+      // Pass ?next=/onboarding so the email confirmation callback lands on onboarding
+      const redirectTo = `${window.location.origin}/auth/callback?next=/onboarding`
       const { error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -45,7 +58,7 @@ function LoginForm() {
       })
       setLoading(false)
       if (authError) { setError(authError.message); return }
-      setSuccess('Check your email to confirm your account, then sign in.')
+      setSuccess('Check your email to confirm your account — you\'ll be taken straight to profile setup.')
     }
   }
 

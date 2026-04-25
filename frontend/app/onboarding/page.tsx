@@ -39,18 +39,7 @@ const SPECIALTIES = [
   'Other',
 ]
 
-const COUNTRIES = [
-  'Kenya', 'Uganda', 'Tanzania', 'Rwanda', 'Burundi', 'Ethiopia', 'Somalia',
-  'Sudan', 'South Sudan', 'Nigeria', 'Ghana', 'Senegal', 'Cameroon',
-  'Ivory Coast', 'Democratic Republic of Congo', 'Angola', 'Zambia',
-  'Malawi', 'Zimbabwe', 'Mozambique', 'Namibia', 'Botswana', 'South Africa',
-  'Madagascar', 'Egypt', 'Morocco', 'Algeria', 'Tunisia', 'Libya',
-  'Mexico', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua',
-  'Costa Rica', 'Panama', 'Cuba', 'Haiti', 'Dominican Republic',
-  'Colombia', 'Venezuela', 'Ecuador', 'Peru', 'Bolivia', 'Brazil',
-  'Chile', 'Argentina', 'Paraguay', 'Uruguay',
-  'United Kingdom', 'United States', 'Canada', 'India', 'Other',
-]
+const COUNTRIES = ['Kenya']
 
 const INTERESTS = [
   'Malaria', 'HIV/AIDS', 'Tuberculosis', 'Maternal Health', 'Child Health',
@@ -158,12 +147,22 @@ export default function OnboardingPage() {
           </div>
         </div>
 
+        {/* Skip link */}
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={() => router.push('/')}
+            className="text-xs text-brand-muted hover:text-brand-text transition-colors"
+          >
+            Skip for now →
+          </button>
+        </div>
+
         {/* Step 1: Welcome */}
         {step === 1 && (
           <div className="animate-fadeIn">
             <h1 className="text-2xl font-bold text-brand-text mb-2">Welcome to Qwiva Community</h1>
             <p className="text-brand-muted text-sm mb-8">
-              Connect with physicians across Africa and LATAM. Let&apos;s set up your profile in a few quick steps.
+              Connect with physicians across Kenya. Let&apos;s set up your profile in a few quick steps.
             </p>
             <div className="space-y-4 bg-brand-surface border border-brand-border rounded-2xl p-6">
               <div>
@@ -182,13 +181,10 @@ export default function OnboardingPage() {
                 <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
                   Country *
                 </label>
-                <select
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-brand-bg border border-brand-border rounded-lg text-sm text-brand-text outline-none focus:border-brand-accent/45 transition-all"
-                >
-                  {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="w-full px-3 py-2.5 bg-brand-surface border border-brand-border rounded-lg text-sm text-brand-text flex items-center gap-2">
+                  <span>🇰🇪</span>
+                  <span>Kenya</span>
+                </div>
               </div>
             </div>
             <button
