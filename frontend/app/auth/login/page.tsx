@@ -51,13 +51,18 @@ function LoginForm() {
     } else {
       // Pass ?next=/onboarding so the email confirmation callback lands on onboarding
       const redirectTo = `${window.location.origin}/auth/callback?next=/onboarding`
-      const { error: authError } = await supabase.auth.signUp({
+      const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: { emailRedirectTo: redirectTo },
       })
       setLoading(false)
       if (authError) { setError(authError.message); return }
+      // If email confirmation is disabled, signUp returns a session immediately
+      if (data.session) {
+        router.push('/onboarding')
+        return
+      }
       setSuccess('Check your email to confirm your account — you\'ll be taken straight to profile setup.')
     }
   }
