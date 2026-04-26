@@ -472,70 +472,479 @@ def detailed():
                "Frontend\nStreamingText.tsx\ntypewriter effect\n[1][2][3] → [1-3] compression",
                "#f3e8ff", "#a855f7", "#3b0764", 10)
 
-    # ── STORAGE ROW ───────────────────────────────────────────────────────
-    STY = 1040
-    els += [R("st_row", 20, STY, 2720, 130, "#f0fdf4", "#22c55e", 2, False)]
-    els += [R("st_row_hdr", 20, STY, 2720, 28, "#14532d", "#14532d", 0, False)]
-    els += [T("st_row_hdr_t", 30, STY + 2, 600, 26,
-               "STORAGE  —  dashed = reads   solid = writes", "#ffffff", 12, "left")]
-
-    st_boxes = [
-        ("stb_qd",  "Qdrant\nqwiva_docs\nHNSW cosine · INT8 quant",      0,   200),
-        ("stb_cpg", "Supabase\nclinical_practice_\nguideline_chunks",   212,   190),
-        ("stb_gh",  "Supabase\nguideline_chunks\n(PubMed articles)",    414,   190),
-        ("stb_dch", "Supabase\ndrug_label_chunks",                      616,   190),
-        ("stb_d2",  "Supabase\ndocuments_v2 (legacy)",                  818,   190),
-        ("stb_cv",  "Supabase\nconversations\n+ messages  (tree)",     1020,   200),
-        ("stb_up",  "Supabase\nuser_profiles",                         1232,   180),
-        ("stb_ps",  "Supabase\nposts · post_likes\ncomments · comment_likes", 1424, 200),
-        ("stb_fw",  "Supabase\nfollows",                               1636,   180),
-    ]
-    for eid, txt, xoff, w in st_boxes:
-        els += [R(eid, 20 + xoff, STY + 32, w - 4, 88, "#dcfce7", "#22c55e", 1)]
-        els += [T(eid + "_t", 24 + xoff, STY + 33, w - 12, 86, txt, "#14532d", 10)]
-
-    # Storage read arrows (dashed, upward to pipeline)
-    els += A("sa_qd",  [(20 + 100,  STY + 32), (c3x + 55,  350)], "#22c55e", True, "vector")
-    els += A("sa_cpg", [(20 + 307,  STY + 32), (c3x + 335, 350)], "#22c55e", True, "FTS RPC")
-    els += A("sa_dch", [(20 + 711,  STY + 32), (c3x + 555, 350)], "#22c55e", True, "FTS+ilike")
-    els += A("sa_cv",  [(20 + 1120, STY + 32), (c0x + 130, 380)], "#22c55e", True, "history")
-
-    # Write arrow: pipeline → conversations
-    els += A("aw_cv", [(c7x + c7w // 2, c7x - 2000),
-                       (c7x + c7w // 2, STY)],
-             "#22c55e", False, "persist")
-
-    # ── SOCIAL SECTION ────────────────────────────────────────────────────
-    SOC_Y = 1192
-    els += [R("soc_bg", 20, SOC_Y, 2720, 290, "#fce7f3", "#ec4899", 2, False)]
-    els += [R("soc_hdr", 20, SOC_Y, 2720, 30, "#831843", "#831843", 0, False)]
-    els += [T("soc_hdr_t", 30, SOC_Y + 2, 800, 28,
-               "SOCIAL LAYER  (backend/social.py + profiles.py  +  Supabase triggers)",
+    # ── ROW A: Vector Store + Chunk Tables ───────────────────────────────
+    RA_Y = 1048
+    RA_H = 820
+    els += [R("ra_bg",  20, RA_Y, 2720, RA_H, "#f0fdf4", "#22c55e", 2, False)]
+    els += [R("ra_hdr", 20, RA_Y, 2720, 32,   "#14532d", "#14532d", 0, False)]
+    els += [T("ra_hdr_t", 30, RA_Y + 2, 1400, 28,
+               "ROW A — VECTOR STORE + CHUNK TABLES  (pgvector · Qdrant · Supabase)",
                "#ffffff", 13, "left")]
+    PA_Y = RA_Y + 36
+    PA_H = RA_H - 44
 
-    soc_items = [
-        ("sc_pst",   "POST /posts\nposts table\ntriggers: post_count++, touch_post()",
-         0, 200),
-        ("sc_lk",    "POST /posts/{id}/like\npost_likes table\ntrigger: like_count ± 1",
-         212, 200),
-        ("sc_feed",  "GET /feed\nget_personalized_feed() RPC\nfollow_boost × 1.5\nspecialty_match × 1.2\nrecency decay + engagement score\ncursor pagination",
-         424, 200),
-        ("sc_disc",  "GET /discover/users\ndiscover_users() RPC\nfilter: specialty / country\norder: followers DESC",
-         636, 200),
-        ("sc_fol",   "POST/DELETE /users/{id}/follow\nfollows table\ntrigger: follower /\nfollowing counts",
-         848, 190),
-        ("sc_cmt",   "POST /posts/{id}/comments\ncomments table  (threaded)\nparent_comment_id\ncomment_likes + trigger",
-         1050, 210),
-        ("sc_prf",   "GET / PUT /profile/me\nuser_profiles table\nonboarding_complete flag\nspecialty · country · bio · avatar",
-         1272, 210),
-        ("sc_msg",   "Chat messages persisted\nappend_user_message() RPC\nappend_assistant_message() RPC\ncitations + evidence_grade (JSONB)\nget_siblings() for branch UI",
-         1494, 220),
-    ]
-    for eid, txt, xoff, w in soc_items:
-        lines = txt.count("\n") + 1
-        h = min(36 + (lines - 1) * 16, 230)
-        els += [R(eid, 20 + xoff, SOC_Y + 38, w - 4, h, "#fdf2f8", "#ec4899", 1)]
-        els += [T(eid + "_t", 24 + xoff, SOC_Y + 39, w - 12, h - 2, txt, "#831843", 10)]
+    # A1 — Qdrant
+    els += box("a1_qd", 24, PA_Y, 450, PA_H,
+        "Qdrant  —  qwiva_docs\n"
+        "Vector: size=1536, distance=Cosine\n"
+        "Quantization: INT8 scalar\n"
+        "  quantile=0.99, always_ram=True\n"
+        "\n"
+        "Payload fields:\n"
+        "  id, content, doc_type\n"
+        "  guideline_title, cascading_path\n"
+        "  publisher, pub_year\n"
+        "  evidence_tier, grade_strength\n"
+        "  grade_direction\n"
+        "  is_current_version BOOL\n"
+        "  superseded_by\n"
+        "  geography, source_url\n"
+        "  doc_id, chunk_index\n"
+        "  inn, section_type\n"
+        "\n"
+        "Payload indexes:\n"
+        "  doc_type = keyword\n"
+        "  is_current_version = bool\n"
+        "  evidence_tier = integer",
+        "#dcfce7", "#22c55e", "#14532d", 10)
+
+    # A2 — clinical_practice_guideline_chunks
+    els += box("a2_cpg", 478, PA_Y, 510, PA_H,
+        "clinical_practice_guideline_chunks\n"
+        "  id UUID  (UUID5: guideline_id:ver:i)\n"
+        "  content TEXT\n"
+        "  embedding vector(1536)\n"
+        "  fts tsvector  (GIN)\n"
+        "  content_hash TEXT  (SHA-256)\n"
+        "  guideline_id TEXT\n"
+        "  guideline_version TEXT\n"
+        "  is_current_version BOOL\n"
+        "  superseded_by TEXT\n"
+        "  guideline_title TEXT\n"
+        "  issuing_body TEXT\n"
+        "  pub_year INT\n"
+        "  evidence_tier INT\n"
+        "  document_type TEXT\n"
+        "  geographic_scope TEXT\n"
+        "  source_url TEXT, licence TEXT\n"
+        "  cascading_path TEXT[]\n"
+        "  chunk_index INT, total_chunks INT\n"
+        "  word_count INT\n"
+        "  chunk_type TEXT DEFAULT 'text'\n"
+        "  created_at TIMESTAMPTZ\n"
+        "\n"
+        "Indexes:\n"
+        "  HNSW cosine (embedding)\n"
+        "  GIN (fts)\n"
+        "  B-tree is_current_version\n"
+        "  B-tree (guideline_id, version)",
+        "#f0fdf4", "#86efac", "#14532d", 10)
+
+    # A3 — guideline_chunks (top) + drug_label_chunks (bottom)
+    GC_H = (PA_H - 8) // 2
+    els += box("a3_gc", 992, PA_Y, 380, GC_H,
+        "guideline_chunks  (PubMed)\n"
+        "  Same schema as CPG table\n"
+        "  doc_type = 'pubmed'\n"
+        "  evidence_tier = 2\n"
+        "  Used by search_pubmed_fts() RPC\n"
+        "  HNSW cosine + GIN fts indexes",
+        "#f0fdf4", "#86efac", "#14532d", 10)
+    els += box("a4_dc", 992, PA_Y + GC_H + 8, 380, PA_H - GC_H - 8,
+        "drug_label_chunks\n"
+        "  id UUID PK\n"
+        "  inn TEXT  (INN drug name)\n"
+        "  medicine_name TEXT\n"
+        "  section_type TEXT:\n"
+        "   dosage_and_administration\n"
+        "   pharmacodynamics\n"
+        "   mechanism_of_action\n"
+        "   indications_and_usage\n"
+        "   adverse_reactions\n"
+        "   pharmacokinetics\n"
+        "   contraindications\n"
+        "   warnings_and_precautions\n"
+        "  content TEXT\n"
+        "  source_type [fda|emc]\n"
+        "  brand_name TEXT\n"
+        "  content_hash TEXT\n"
+        "  created_at TIMESTAMPTZ\n"
+        "Indexes: B-tree inn, GIN fts",
+        "#f0fdf4", "#86efac", "#14532d", 10)
+
+    # A4 — documents_v2 (legacy)
+    els += box("a5_d2", 1376, PA_Y, 520, PA_H,
+        "documents_v2  (LEGACY)\n"
+        "  id BIGSERIAL PK\n"
+        "  content TEXT\n"
+        "  embedding vector(1536)\n"
+        "  metadata JSONB\n"
+        "  fts tsvector\n"
+        "  record_manager_id FK\n"
+        "\n"
+        "Generated columns (migration 001, STORED):\n"
+        "  guideline_title  (metadata->>'guideline_title')\n"
+        "  publisher        (metadata->>'publisher')\n"
+        "  geography        (metadata->>'geography')\n"
+        "  doc_id_col       (metadata->>'doc_id')\n"
+        "  chunk_index_col::INT\n"
+        "  year_pub::INT    (metadata->>'year')\n"
+        "\n"
+        "Indexes:\n"
+        "  HNSW cosine (embedding)\n"
+        "  GIN fts, GIN metadata\n"
+        "  B-tree doc_id, chunk_index\n"
+        "  B-tree generated cols\n"
+        "\n"
+        "RPCs:\n"
+        "  match_documents(query_embedding,\n"
+        "    match_count)\n"
+        "  get_chunks_by_ranges(doc_id, ranges)\n"
+        "  dynamic_hybrid_search_db(\n"
+        "    query_text, query_embedding,\n"
+        "    match_count, ...filters)",
+        "#fefce8", "#ca8a04", "#713f12", 10)
+
+    # A5 — Extensions + Legacy Tables
+    els += box("a6_ext", 1900, PA_Y, 836, PA_H,
+        "Extensions + Legacy Tables\n"
+        "\n"
+        "Extensions:\n"
+        "  pgvector  — vector similarity + HNSW indexes\n"
+        "  pg_trgm   — trigram similarity (GIN indexes)\n"
+        "\n"
+        "record_manager_v2:\n"
+        "  id BIGSERIAL, doc_id TEXT, hash TEXT\n"
+        "  data_type TEXT, schema TEXT\n"
+        "  document_title TEXT, document_headline TEXT\n"
+        "  document_summary TEXT, status TEXT\n"
+        "\n"
+        "metadata_fields  (schema registry):\n"
+        "  id, metadata_name TEXT\n"
+        "  allowed_values TEXT[]\n"
+        "\n"
+        "tabular_document_rows:\n"
+        "  id, record_manager_id FK\n"
+        "  row_data JSONB  (structured table rows\n"
+        "  extracted from guideline tables)\n"
+        "\n"
+        "n8n_chat_histories  (LEGACY):\n"
+        "  flat chat format\n"
+        "  superseded by conversations + messages",
+        "#fef9c3", "#ca8a04", "#713f12", 10)
+
+    # Arrows: pipeline → ROW A
+    els += A("da_qd",  [(c3x + 110, COL_Y + COL_H), (24 + 200,  RA_Y)], "#22c55e", True, "vector")
+    els += A("da_cpg", [(c3x + 340, COL_Y + COL_H), (478 + 200, RA_Y)], "#22c55e", True, "CPG FTS")
+    els += A("da_dc",  [(c3x + 560, COL_Y + COL_H), (992 + 140, RA_Y + GC_H + 8)], "#22c55e", True, "drug FTS")
+    els += A("da_d2",  [(c3x + 660, COL_Y + COL_H), (1376 + 100, RA_Y)], "#22c55e", True, "legacy RPC")
+
+    # ── ROW B: App Tables ─────────────────────────────────────────────────
+    RB_Y = RA_Y + RA_H + 16
+    RB_H = 820
+    els += [R("rb_bg",  20, RB_Y, 2720, RB_H, "#eff6ff", "#3b82f6", 2, False)]
+    els += [R("rb_hdr", 20, RB_Y, 2720, 32,   "#1e3a8a", "#1e3a8a", 0, False)]
+    els += [T("rb_hdr_t", 30, RB_Y + 2, 1400, 28,
+               "ROW B — APP TABLES  (Auth · Chat History · Profiles · Follows)",
+               "#ffffff", 13, "left")]
+    PB_Y = RB_Y + 36
+    PB_H = RB_H - 44
+
+    # B1 — conversations
+    els += box("b1_conv", 24, PB_Y, 420, PB_H,
+        "conversations\n"
+        "  id UUID PK DEFAULT gen_random_uuid()\n"
+        "  user_id UUID FK auth.users CASCADE\n"
+        "  title TEXT NULL\n"
+        "  title_generated BOOL DEFAULT FALSE\n"
+        "  created_at TIMESTAMPTZ\n"
+        "  updated_at TIMESTAMPTZ\n"
+        "\n"
+        "Index:\n"
+        "  B-tree (user_id, updated_at DESC)\n"
+        "\n"
+        "RLS:\n"
+        "  SELECT/INSERT/UPDATE/DELETE\n"
+        "  WHERE auth.uid() = user_id\n"
+        "\n"
+        "Trigger: touch_conversation()\n"
+        "  AFTER INSERT on messages\n"
+        "  UPDATE conversations\n"
+        "  SET updated_at = NOW()\n"
+        "  WHERE id = NEW.conversation_id",
+        "#dbeafe", "#3b82f6", "#1e3a8a", 10)
+
+    # B2 — messages
+    els += box("b2_msg", 448, PB_Y, 600, PB_H,
+        "messages\n"
+        "  id UUID PK DEFAULT gen_random_uuid()\n"
+        "  conversation_id UUID FK CASCADE\n"
+        "  parent_id UUID FK self NULL  (NULL=root)\n"
+        "  selected_child_id UUID FK self NULL\n"
+        "    (NULL=leaf, tracks active branch)\n"
+        "  role TEXT  [user|assistant]\n"
+        "  content TEXT\n"
+        "  citations JSONB  (assistant only)\n"
+        "  evidence_grade TEXT  (assistant only)\n"
+        "  branch_index INT DEFAULT 0\n"
+        "    (0=original, 1,2...=edits at fork)\n"
+        "  created_at TIMESTAMPTZ\n"
+        "\n"
+        "Indexes:\n"
+        "  B-tree (conversation_id, created_at)\n"
+        "  B-tree parent_id\n"
+        "  B-tree (parent_id, branch_index)\n"
+        "\n"
+        "RLS: via conversation JOIN\n"
+        "Trigger: touch_conversation (above)\n"
+        "\n"
+        "Chat RPCs:\n"
+        "  get_active_path(conversation_id)\n"
+        "    recursive CTE: root -> leaf\n"
+        "    follows selected_child_id\n"
+        "  get_siblings(parent_id)\n"
+        "    all branches at a fork\n"
+        "  append_user_message(conv_id,\n"
+        "    parent_id, content)\n"
+        "    INSERT + UPDATE selected_child_id\n"
+        "  append_assistant_message(conv_id,\n"
+        "    parent_id, content, citations,\n"
+        "    evidence_grade)",
+        "#dbeafe", "#3b82f6", "#1e3a8a", 10)
+
+    # B3 — auth.users + user_profiles
+    els += box("b3_prof", 1052, PB_Y, 570, PB_H,
+        "auth.users  (Supabase managed)\n"
+        "  id UUID PK, email TEXT\n"
+        "  encrypted_password TEXT\n"
+        "  created_at, last_sign_in_at\n"
+        "\n"
+        "user_profiles\n"
+        "  user_id UUID PK FK auth.users CASCADE\n"
+        "  display_name TEXT NOT NULL\n"
+        "  specialty TEXT, subspecialty TEXT\n"
+        "  institution TEXT\n"
+        "  country TEXT DEFAULT 'Kenya'\n"
+        "  city TEXT, bio TEXT, avatar_url TEXT\n"
+        "  years_experience INT\n"
+        "  medical_license TEXT\n"
+        "  verification_status TEXT DEFAULT 'unverified'\n"
+        "    [unverified|pending|verified]\n"
+        "  languages TEXT[], interests TEXT[]\n"
+        "  onboarding_complete BOOL DEFAULT FALSE\n"
+        "  follower_count INT DEFAULT 0\n"
+        "  following_count INT DEFAULT 0\n"
+        "  post_count INT DEFAULT 0\n"
+        "  created_at, updated_at\n"
+        "\n"
+        "Indexes: specialty, country, follower_count DESC\n"
+        "RLS: SELECT all, write own\n"
+        "\n"
+        "Triggers:\n"
+        "  handle_new_user()  AFTER INSERT auth.users\n"
+        "    -> auto-create skeleton profile\n"
+        "    display_name from email, country='Kenya'\n"
+        "  touch_profile()  AFTER UPDATE\n"
+        "    -> SET updated_at = NOW()",
+        "#dbeafe", "#3b82f6", "#1e3a8a", 10)
+
+    # B4 — follows + social RPCs
+    els += box("b4_fol", 1626, PB_Y, 1110, PB_H,
+        "follows\n"
+        "  follower_id UUID FK user_profiles\n"
+        "  following_id UUID FK user_profiles\n"
+        "  PK: (follower_id, following_id)\n"
+        "  CHECK: follower_id <> following_id\n"
+        "  Indexes: B-tree follower_id, B-tree following_id\n"
+        "  RLS: SELECT all, INSERT/DELETE own\n"
+        "\n"
+        "Trigger: update_follow_counts()\n"
+        "  AFTER INSERT -> follower_count++ on following_id\n"
+        "                  following_count++ on follower_id\n"
+        "  AFTER DELETE -> decrement both\n"
+        "\n"
+        "Social RPCs:\n"
+        "  get_personalized_feed(user_id, cursor, limit=20, filter)\n"
+        "    Score = follow_boost(1.5) x specialty_match(1.2)\n"
+        "          x recency_decay\n"
+        "          + 0.1 x log(1+likes)\n"
+        "          + 0.05 x log(1+comments)\n"
+        "    Cursor pagination on created_at\n"
+        "\n"
+        "  discover_users(user_id, specialty, country,\n"
+        "    limit=20, offset=0)\n"
+        "    Filter: onboarding_complete=TRUE\n"
+        "    Order: follower_count DESC\n"
+        "\n"
+        "  get_post_with_context(post_id, user_id)\n"
+        "\n"
+        "  get_comments_with_context(post_id, user_id,\n"
+        "    limit=50) — threaded by parent_comment_id",
+        "#dbeafe", "#3b82f6", "#1e3a8a", 10)
+
+    # Arrows: pipeline -> ROW B
+    els += A("db_cv",  [(c0x + 130, COL_Y + COL_H), (24 + 200,  RB_Y)], "#22c55e", True, "history")
+    els += A("db_msg", [(c7x + 140, COL_Y + COL_H), (448 + 280, RB_Y)], "#22c55e", False, "persist")
+
+    # ── ROW C: Social Tables ──────────────────────────────────────────────
+    RC_Y = RB_Y + RB_H + 16
+    RC_H = 700
+    els += [R("rc_bg",  20, RC_Y, 2720, RC_H, "#fdf2f8", "#ec4899", 2, False)]
+    els += [R("rc_hdr", 20, RC_Y, 2720, 32,   "#831843", "#831843", 0, False)]
+    els += [T("rc_hdr_t", 30, RC_Y + 2, 1400, 28,
+               "ROW C — SOCIAL TABLES  (posts · post_likes · comments · comment_likes)",
+               "#ffffff", 13, "left")]
+    PC_Y = RC_Y + 36
+    PC_H = RC_H - 44
+
+    # C1 — posts
+    els += box("c1_pst", 24, PC_Y, 580, PC_H,
+        "posts\n"
+        "  id UUID PK DEFAULT gen_random_uuid()\n"
+        "  author_id UUID FK user_profiles CASCADE\n"
+        "  content TEXT CHECK(length 1-5000)\n"
+        "  post_type TEXT DEFAULT 'question'\n"
+        "    [question|case_discussion|\n"
+        "     clinical_pearl|resource]\n"
+        "  tags TEXT[]\n"
+        "  specialty_tags TEXT[]\n"
+        "  image_urls TEXT[]\n"
+        "  is_anonymous BOOL DEFAULT FALSE\n"
+        "  like_count INT DEFAULT 0\n"
+        "  comment_count INT DEFAULT 0\n"
+        "  view_count INT DEFAULT 0\n"
+        "  created_at TIMESTAMPTZ\n"
+        "  updated_at TIMESTAMPTZ\n"
+        "  is_deleted BOOL DEFAULT FALSE\n"
+        "\n"
+        "Indexes:\n"
+        "  B-tree (author_id, created_at DESC)\n"
+        "  B-tree created_at DESC WHERE NOT is_deleted\n"
+        "  GIN specialty_tags, GIN tags\n"
+        "  B-tree (like_count DESC, comment_count DESC)\n"
+        "    WHERE NOT is_deleted\n"
+        "  GIN to_tsvector('english', content)\n"
+        "\n"
+        "RLS: SELECT if not deleted, write own\n"
+        "\n"
+        "Triggers:\n"
+        "  touch_post() AFTER UPDATE\n"
+        "    -> updated_at = NOW()\n"
+        "  update_user_post_count()\n"
+        "    AFTER INSERT -> post_count++\n"
+        "    AFTER DELETE -> post_count--\n"
+        "    on user_profiles",
+        "#fce7f3", "#ec4899", "#831843", 10)
+
+    # C2 — post_likes (top) + comments (bottom)
+    PL_H = (PC_H - 8) // 2
+    els += box("c2_pl", 608, PC_Y, 420, PL_H,
+        "post_likes\n"
+        "  post_id UUID FK posts CASCADE\n"
+        "  user_id UUID FK user_profiles CASCADE\n"
+        "  PK: (post_id, user_id)\n"
+        "  created_at TIMESTAMPTZ\n"
+        "  RLS: SELECT all, INSERT/DELETE own\n"
+        "\n"
+        "Trigger: update_post_like_count()\n"
+        "  AFTER INSERT -> like_count++ on posts\n"
+        "  AFTER DELETE -> like_count-- on posts",
+        "#fce7f3", "#f472b6", "#831843", 10)
+    els += box("c3_cmt", 608, PC_Y + PL_H + 8, 420, PC_H - PL_H - 8,
+        "comments\n"
+        "  id UUID PK\n"
+        "  post_id UUID FK posts CASCADE\n"
+        "  author_id UUID FK user_profiles CASCADE\n"
+        "  parent_comment_id UUID FK self NULL\n"
+        "    (NULL=top-level, non-NULL=reply)\n"
+        "  content TEXT CHECK(length 1-2000)\n"
+        "  is_anonymous BOOL DEFAULT FALSE\n"
+        "  like_count INT DEFAULT 0\n"
+        "  created_at TIMESTAMPTZ\n"
+        "  is_deleted BOOL DEFAULT FALSE\n"
+        "\n"
+        "Indexes: (post_id, created_at),\n"
+        "  parent_comment_id\n"
+        "RLS: SELECT if not deleted, write own\n"
+        "Trigger: update_post_comment_count()\n"
+        "  AFTER INSERT -> comment_count++\n"
+        "  AFTER DELETE -> comment_count--\n"
+        "  on posts",
+        "#fce7f3", "#f472b6", "#831843", 10)
+
+    # C3 — comment_likes (top) + trigger map (bottom)
+    CL_H = PC_H // 3
+    els += box("c4_cl", 1032, PC_Y, 440, CL_H,
+        "comment_likes\n"
+        "  comment_id UUID FK comments CASCADE\n"
+        "  user_id UUID FK user_profiles CASCADE\n"
+        "  PK: (comment_id, user_id)\n"
+        "  created_at TIMESTAMPTZ\n"
+        "  RLS: SELECT all, INSERT/DELETE own\n"
+        "Trigger: update_comment_like_count()\n"
+        "  AFTER INSERT -> like_count++ on comments\n"
+        "  AFTER DELETE -> like_count-- on comments",
+        "#fce7f3", "#f472b6", "#831843", 10)
+    els += box("c5_trg", 1032, PC_Y + CL_H + 8, 440, PC_H - CL_H - 8,
+        "Complete Trigger Map\n"
+        "\n"
+        "auth.users INSERT\n"
+        "  -> handle_new_user() [profiles]\n"
+        "user_profiles UPDATE\n"
+        "  -> touch_profile()\n"
+        "messages INSERT\n"
+        "  -> touch_conversation()\n"
+        "posts INSERT/DELETE\n"
+        "  -> update_user_post_count()\n"
+        "posts UPDATE\n"
+        "  -> touch_post()\n"
+        "post_likes INSERT/DELETE\n"
+        "  -> update_post_like_count()\n"
+        "comments INSERT/DELETE\n"
+        "  -> update_post_comment_count()\n"
+        "comment_likes INSERT/DELETE\n"
+        "  -> update_comment_like_count()\n"
+        "follows INSERT/DELETE\n"
+        "  -> update_follow_counts()",
+        "#fdf4ff", "#a855f7", "#4c1d95", 10)
+
+    # C4 — RLS Summary
+    els += box("c6_rls", 1476, PC_Y, 1260, PC_H,
+        "RLS Policy Summary\n"
+        "\n"
+        "conversations:\n"
+        "  All ops WHERE auth.uid() = user_id\n"
+        "\n"
+        "messages:\n"
+        "  Via JOIN conversations\n"
+        "  WHERE auth.uid() = user_id\n"
+        "\n"
+        "user_profiles:\n"
+        "  SELECT: all authenticated\n"
+        "  INSERT/UPDATE/DELETE: own uid = user_id\n"
+        "\n"
+        "posts:\n"
+        "  SELECT: WHERE NOT is_deleted\n"
+        "  INSERT: authenticated users\n"
+        "  UPDATE/DELETE: auth.uid() = author_id\n"
+        "\n"
+        "post_likes / comment_likes:\n"
+        "  SELECT: all authenticated\n"
+        "  INSERT/DELETE: own uid = user_id\n"
+        "\n"
+        "comments:\n"
+        "  SELECT: WHERE NOT is_deleted\n"
+        "  INSERT: authenticated users\n"
+        "  UPDATE/DELETE: auth.uid() = author_id\n"
+        "\n"
+        "follows:\n"
+        "  SELECT: all authenticated\n"
+        "  INSERT/DELETE: own uid = follower_id\n"
+        "\n"
+        "documents_v2 / chunk tables:\n"
+        "  Service role only (backend key)\n"
+        "  No anon/user RLS policies",
+        "#f5f3ff", "#7c3aed", "#3b0764", 10)
 
     return flatten(els)
 
