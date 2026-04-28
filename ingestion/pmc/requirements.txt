@@ -1,0 +1,35 @@
+# Qwiva Ingestion Pipeline — Python Dependencies
+# Covers: ingest_pipeline.py, pmc_oa_ingest.py, who_update_monitor.py,
+#         who_iris_url_resolver.py, embed_backfill.py
+# Last updated: April 2026
+
+# HTTP + HTML parsing
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# OpenAI — pinned to 1.x, avoids breaking changes in 2.x
+# Pipeline uses client.embeddings.create() which is 1.x API
+openai==1.109.1
+
+# Supabase client
+supabase==2.28.3
+
+# Anthropic — used for LLM enrichment of recommendation chunks in pmc_oa_ingest.py
+anthropic==0.89.0
+
+# PDF parsing — used by WHO IRIS pipeline
+pdfplumber==0.11.4
+pypdf==5.1.0
+
+# Environment variable loading
+python-dotenv==1.0.1
+
+# YAML — guideline_manifest.yaml parsing
+pyyaml==6.0.2
+
+# RSS feed parsing — who_update_monitor.py
+feedparser==6.0.11
+
+# Slack alerts — optional, used by pmc_oa_ingest.py and who_update_monitor.py
+slack-sdk==3.41.0
