@@ -1,0 +1,47 @@
+# railway.toml — Qwiva CPG Pipeline
+# Docs: https://docs.railway.app/reference/config-as-code
+#
+# Services:
+#   nice-pipeline     — Monthly NICE guideline sync (1st of month, 2am UTC)
+#   moh-pipeline      — Quarterly MOH Kenya sync (1st of Jan/Apr/Jul/Oct)
+#
+# Deploy: railway up
+# Trigger manually: railway run --service nice-pipeline
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+# ── NICE — monthly cron ───────────────────────────────────────────────────────
+[[services]]
+name = "nice-pipeline"
+
+[services.deploy]
+startCommand = "python run_pipeline.py --source nice"
+restartPolicyType = "never"    # cron job — don't restart on completion
+
+[services.cron]
+schedule = "0 2 1 * *"         # 2am UTC on the 1st of every month
+
+[services.variables]
+SOURCE       = "nice"
+STAGES       = "1,2,3,4"
+RETRY_FAILED = "false"
+LOG_LEVEL    = "INFO"
+
+# ── MOH Kenya — quarterly cron ────────────────────────────────────────────────
+[[services]]
+name = "moh-pipeline"
+
+[services.deploy]
+startCommand = "python run_pipeline.py --source moh_kenya"
+restartPolicyType = "never"
+
+[services.cron]
+schedule = "0 3 1 1,4,7,10 *"  # 3am UTC on 1st of Jan, Apr, Jul, Oct
+
+[services.variables]
+SOURCE       = "moh_kenya"
+STAGES       = "1,2,3,4"
+RETRY_FAILED = "false"
+LOG_LEVEL    = "INFO"
