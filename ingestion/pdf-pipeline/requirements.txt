@@ -1,0 +1,27 @@
+# pdf-pipeline/requirements.txt
+
+# Core
+pymupdf==1.24.10
+pymupdf4llm==0.0.17
+httpx==0.27.0
+python-dotenv==1.0.1
+
+# PDF text + tables
+pdfplumber==0.11.4
+
+# OCR APIs (no local OCR binaries needed)
+mistralai==1.2.5
+anthropic==0.34.0
+openai==1.51.0
+
+# Structure detection (optional — improves heading detection)
+# docling==2.5.0  # uncomment if you want enhanced structure; adds ~2GB to image
+
+# Upload script (local only)
+tqdm==4.66.4
+
+# REMOVED — no longer needed:
+# pytesseract, easyocr, opencv-python-headless, Pillow, numpy
+# These required system packages (tesseract-ocr, libgl1) and were the
+# primary source of Railway build complexity and runtime crashes.
+# Mistral OCR replaces all of them with a single API call.
