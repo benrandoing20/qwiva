@@ -1,0 +1,8 @@
+# railway.toml
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "python pipeline.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

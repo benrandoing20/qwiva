@@ -65,9 +65,11 @@ async def run_ragas(
 
     dataset = EvaluationDataset(samples=samples)
 
-    # NVIDIA hub is OpenAI-compatible. Strip the LiteLLM "openai/" routing prefix
-    # so ChatOpenAI sends the model name the hub expects.
-    model_name = config.judge_model.removeprefix("openai/")
+    from backend.config import get_settings as _get_settings
+    _s = _get_settings()
+
+    # Strip LiteLLM routing prefix (e.g. "groq/") — ChatOpenAI sends the bare model name.
+    model_name = config.judge_model.split("/", 1)[-1]
     base_url = config.judge_api_base.rstrip("/")
 
     judge_llm = LangchainLLMWrapper(
@@ -77,11 +79,11 @@ async def run_ragas(
             base_url=base_url,
         )
     )
+    # Embeddings use OpenAI direct (text-embedding-3-small) — separate from the judge LLM.
     embeddings = LangchainEmbeddingsWrapper(
         OpenAIEmbeddings(
-            model="azure/openai/text-embedding-3-small",
-            openai_api_key=config.judge_api_key,
-            openai_api_base=base_url,
+            model="text-embedding-3-small",
+            openai_api_key=_s.openai_api_key,
         )
     )
 

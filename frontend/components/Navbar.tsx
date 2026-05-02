@@ -8,9 +8,10 @@ import ThemeToggle from '@/components/ThemeToggle'
 
 interface NavbarProps {
   onToggleSidebar?: () => void
+  onNewChat?: () => void
 }
 
-export default function Navbar({ onToggleSidebar }: NavbarProps) {
+export default function Navbar({ onToggleSidebar, onNewChat }: NavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
 
@@ -49,6 +50,36 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
             Search
           </Link>
           <Link
+            href="/community"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              pathname?.startsWith('/community')
+                ? 'text-brand-text bg-brand-raised'
+                : 'text-brand-muted hover:text-brand-text'
+            }`}
+          >
+            Community
+          </Link>
+          <Link
+            href="/surveys"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              pathname?.startsWith('/surveys')
+                ? 'text-brand-text bg-brand-raised'
+                : 'text-brand-muted hover:text-brand-text'
+            }`}
+          >
+            Surveys
+          </Link>
+          <Link
+            href="/discover"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              pathname === '/discover'
+                ? 'text-brand-text bg-brand-raised'
+                : 'text-brand-muted hover:text-brand-text'
+            }`}
+          >
+            Discover
+          </Link>
+          <Link
             href="/learn"
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
               pathname === '/learn'
@@ -61,10 +92,34 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
         </nav>
       </div>
       <div className="flex items-center gap-1">
+        {onNewChat && (
+          <button
+            onClick={onNewChat}
+            className="p-1.5 text-brand-muted hover:text-brand-text transition-colors"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+        )}
         <ThemeToggle />
+        <Link
+          href="/profile/me"
+          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+            pathname?.startsWith('/profile')
+              ? 'text-brand-text bg-brand-raised'
+              : 'text-brand-muted hover:text-brand-text'
+          }`}
+        >
+          Profile
+        </Link>
         <button
           onClick={signOut}
-          className="text-sm text-brand-muted hover:text-brand-text transition-colors"
+          className="text-sm text-brand-muted hover:text-brand-text transition-colors px-3 py-1.5"
         >
           Sign out
         </button>

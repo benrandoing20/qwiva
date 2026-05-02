@@ -1,0 +1,25 @@
+# CPG Pipeline — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Supabase
+supabase>=2.4.0
+
+# HTTP
+httpx>=0.27.0
+
+# HTML parsing
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# PDF parsing
+pymupdf>=1.24.0           # fitz — layout-aware PDF text extraction
+
+# AI
+anthropic>=0.28.0         # Claude Haiku for context headers
+openai>=1.30.0            # text-embedding-3-large
+
+# Tokenization
+tiktoken>=0.7.0           # cl100k_base for token counting
+
+# Utilities
+python-dotenv>=1.0.0      # .env loading

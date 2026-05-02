@@ -65,11 +65,12 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
 
     # Search tuning
-    retrieval_top_k: int = 25
-    rerank_top_n: int = 7
+    retrieval_top_k: int = 40
+    rerank_top_n: int = 10
     rrf_k: int = 60
     dense_weight: float = 0.6   # must sum to 1.0 with sparse_weight
     sparse_weight: float = 0.4
+    qdrant_score_threshold: float | None = None  # optional cosine similarity floor (e.g. 0.70); None = disabled
 
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> "Settings":

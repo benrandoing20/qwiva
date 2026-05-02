@@ -16,10 +16,10 @@ class EvalConfig:
     def __post_init__(self):
         s = get_settings()
         if self.judge_model is None:
-            # Route judge through NVIDIA hub (OpenAI-compat) using existing NVIDIA_API_KEY.
-            # "openai/" prefix tells LiteLLM to use the OpenAI-compatible endpoint.
-            self.judge_model = "openai/aws/anthropic/bedrock-claude-opus-4-6"
+            # Groq is OpenAI-compatible (works with ChatOpenAI in RAGAS),
+            # already in the stack, and much cheaper than Anthropic for eval judging.
+            self.judge_model = s.classify_model  # groq/llama-3.3-70b-versatile
         if self.judge_api_key is None:
-            self.judge_api_key = s.nvidia_api_key
+            self.judge_api_key = s.groq_api_key
         if self.judge_api_base is None:
-            self.judge_api_base = s.nvidia_api_base
+            self.judge_api_base = "https://api.groq.com/openai/v1"

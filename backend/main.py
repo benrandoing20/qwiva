@@ -49,13 +49,61 @@ from backend.conversations import (
 )
 from backend.db import get_db
 from backend.models import (
+    CommentOut,
     ConversationSummary,
+    CreateCommentRequest,
+    CreatePostRequest,
+    DiscoverUserOut,
+    LikeResponse,
     MessageOut,
+    OnboardingRequest,
+    PhysicianProfileOut,
+    PostOut,
+    ProfileUpdateRequest,
     SearchRequest,
     SiblingOut,
+    SurveyCreate,
+    SurveyOut,
+    SurveyResponseCreate,
+    SurveyResultsOut,
+    SurveyStatusUpdate,
     UserProfile,
 )
+from backend.profiles import (
+    complete_onboarding,
+    get_profile,
+    get_profile_or_create,
+    list_profiles_for_feed,
+    upsert_profile,
+)
 from backend.rag import rag
+from backend.surveys import (
+    create_survey as _create_survey,
+    get_results as _get_results,
+    get_survey_detail as _get_survey_detail,
+    list_my_surveys as _list_my_surveys,
+    list_surveys as _list_surveys,
+    require_admin,
+    submit_response as _submit_response,
+)
+from backend.social import (
+    create_comment,
+    create_post,
+    delete_comment,
+    delete_post,
+    follow_user,
+    get_comments,
+    get_feed,
+    get_followers,
+    get_following,
+    get_post,
+    get_posts_by_author,
+    get_trending_posts,
+    is_following,
+    toggle_comment_like,
+    toggle_post_like,
+    unfollow_user,
+)
 
 _settings = get_settings()
 
@@ -90,7 +138,10 @@ app = FastAPI(title="Qwiva API", version="0.1.0")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.onrender.com", "localhost", "127.0.0.1"])
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*.onrender.com", "*.fly.dev", "localhost", "127.0.0.1", "*"],
+)
 
 
 @app.on_event("startup")
@@ -111,7 +162,7 @@ app.add_middleware(
     allow_origins=[_settings.frontend_url, "http://localhost:3000"],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -215,6 +266,378 @@ async def remove_conversation(
     if not convo:
         raise HTTPException(status_code=404, detail="Conversation not found")
     await delete_conversation(conversation_id, user.user_id)
+
+
+# ---------------------------------------------------------------------------
+# Profiles + Onboarding
+# ---------------------------------------------------------------------------
+
+
+@app.get("/profile/me", response_model=PhysicianProfileOut)
+async def get_my_profile(user: UserProfile = Depends(verify_token)):
+    profile = await get_profile_or_create(user.user_id, user.email)
+    return PhysicianProfileOut(**profile)
+
+
+@app.put("/profile/me", response_model=PhysicianProfileOut)
+async def update_my_profile(
+    body: ProfileUpdateRequest,
+    user: UserProfile = Depends(verify_token),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    profile = await upsert_profile(user.user_id, updates)
+    return PhysicianProfileOut(**profile)
+
+
+@app.post("/profile/me/onboarding", response_model=PhysicianProfileOut)
+async def finish_onboarding(
+    body: OnboardingRequest,
+    user: UserProfile = Depends(verify_token),
+):
+    profile = await complete_onboarding(
+        user.user_id, body.model_dump(exclude_none=True), user.email
+    )
+    return PhysicianProfileOut(**profile)
+
+
+@app.get("/profile/{user_id}", response_model=PhysicianProfileOut)
+async def get_user_profile(
+    user_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    profile = await get_profile(user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    following = None if user_id == user.user_id else await is_following(user.user_id, user_id)
+    return PhysicianProfileOut(**profile, is_following=following)
+
+
+# ---------------------------------------------------------------------------
+# Feed + Posts
+# ---------------------------------------------------------------------------
+
+
+@app.get("/feed", response_model=list[PostOut])
+async def community_feed(
+    cursor: str | None = None,
+    limit: int = 20,
+    filter: str = "all",
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_feed(user.user_id, cursor, min(limit, 50), filter)
+    return [PostOut(**r) for r in rows]
+
+
+@app.get("/posts/trending", response_model=list[PostOut])
+async def trending_posts(
+    limit: int = 20,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_trending_posts(user.user_id, min(limit, 50))
+    return [PostOut(**r) for r in rows]
+
+
+@app.post("/posts", response_model=PostOut, status_code=201)
+async def new_post(
+    body: CreatePostRequest,
+    user: UserProfile = Depends(verify_token),
+):
+    if len(body.content.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Post content must not be empty.")
+    post = await create_post(
+        author_id=user.user_id,
+        content=body.content.strip(),
+        post_type=body.post_type,
+        tags=body.tags,
+        specialty_tags=body.specialty_tags,
+        is_anonymous=body.is_anonymous,
+    )
+    # Fetch with full context so the response has author info
+    full = await get_post(post["id"], user.user_id)
+    return PostOut(**full)
+
+
+@app.get("/posts/{post_id}", response_model=PostOut)
+async def get_single_post(
+    post_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    post = await get_post(post_id, user.user_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return PostOut(**post)
+
+
+@app.delete("/posts/{post_id}", status_code=204)
+async def remove_post(
+    post_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    deleted = await delete_post(post_id, user.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Post not found or not yours")
+
+
+@app.post("/posts/{post_id}/like", response_model=LikeResponse)
+async def like_post(
+    post_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    liked = await toggle_post_like(post_id, user.user_id)
+    post = await get_post(post_id, user.user_id)
+    return LikeResponse(liked=liked, like_count=post["like_count"] if post else 0)
+
+
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+
+@app.get("/posts/{post_id}/comments", response_model=list[CommentOut])
+async def list_comments(
+    post_id: str,
+    limit: int = 50,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_comments(post_id, user.user_id, min(limit, 100))
+    return [CommentOut(**r) for r in rows]
+
+
+@app.post("/posts/{post_id}/comments", response_model=CommentOut, status_code=201)
+async def add_comment(
+    post_id: str,
+    body: CreateCommentRequest,
+    user: UserProfile = Depends(verify_token),
+):
+    if len(body.content.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Comment must not be empty.")
+    comment = await create_comment(
+        post_id=post_id,
+        author_id=user.user_id,
+        content=body.content.strip(),
+        parent_comment_id=body.parent_comment_id,
+        is_anonymous=body.is_anonymous,
+    )
+    # Fetch back with author context
+    all_comments = await get_comments(post_id, user.user_id)
+    match = next((c for c in all_comments if c["id"] == comment["id"]), None)
+    if not match:
+        raise HTTPException(status_code=500, detail="Comment created but could not be fetched")
+    return CommentOut(**match)
+
+
+@app.delete("/comments/{comment_id}", status_code=204)
+async def remove_comment(
+    comment_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    deleted = await delete_comment(comment_id, user.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Comment not found or not yours")
+
+
+@app.post("/comments/{comment_id}/like", response_model=LikeResponse)
+async def like_comment(
+    comment_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    liked = await toggle_comment_like(comment_id, user.user_id)
+    db = await get_db()
+    row = await db.table("comments").select("like_count").eq("id", comment_id).maybe_single().execute()
+    return LikeResponse(liked=liked, like_count=(row.data or {}).get("like_count", 0))
+
+
+# ---------------------------------------------------------------------------
+# Follows
+# ---------------------------------------------------------------------------
+
+
+@app.post("/users/{user_id}/follow", status_code=204)
+async def follow(
+    user_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    if user_id == user.user_id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+    await follow_user(user.user_id, user_id)
+
+
+@app.delete("/users/{user_id}/follow", status_code=204)
+async def unfollow(
+    user_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    await unfollow_user(user.user_id, user_id)
+
+
+@app.get("/users/{user_id}/followers", response_model=list[DiscoverUserOut])
+async def user_followers(
+    user_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_followers(user_id, user.user_id, min(limit, 100), offset)
+    return [DiscoverUserOut(**r) for r in rows]
+
+
+@app.get("/users/{user_id}/following", response_model=list[DiscoverUserOut])
+async def user_following(
+    user_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_following(user_id, user.user_id, min(limit, 100), offset)
+    return [DiscoverUserOut(**r) for r in rows]
+
+
+@app.get("/users/{user_id}/posts", response_model=list[PostOut])
+async def user_posts(
+    user_id: str,
+    cursor: str | None = None,
+    limit: int = 20,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await get_posts_by_author(user_id, user.user_id, cursor, min(limit, 50))
+    return [PostOut(**r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Discover
+# ---------------------------------------------------------------------------
+
+
+@app.get("/discover/users", response_model=list[DiscoverUserOut])
+async def discover_users(
+    specialty: str | None = None,
+    country: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    user: UserProfile = Depends(verify_token),
+):
+    rows = await list_profiles_for_feed(
+        user.user_id,
+        specialty=specialty,
+        country=country,
+        limit=min(limit, 50),
+        offset=offset,
+    )
+    return [DiscoverUserOut(**r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Surveys
+# ---------------------------------------------------------------------------
+
+_VALID_SURVEY_TRANSITIONS = {("draft", "active"), ("active", "closed")}
+
+
+@app.get("/surveys", response_model=list[SurveyOut])
+async def list_surveys_route(
+    user: UserProfile = Depends(verify_token),
+):
+    profile = await get_profile(user.user_id)
+    is_admin = profile and profile.get("role") == "admin"
+    if is_admin:
+        active, mine = await asyncio.gather(
+            _list_surveys(user.user_id, status="active"),
+            _list_my_surveys(user.user_id),
+        )
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for s in mine + active:
+            if s["id"] not in seen:
+                seen.add(s["id"])
+                merged.append(s)
+        return [SurveyOut(**s) for s in merged]
+    rows = await _list_surveys(user.user_id, status="active")
+    return [SurveyOut(**r) for r in rows]
+
+
+@app.get("/surveys/{survey_id}", response_model=SurveyOut)
+async def get_survey_route(
+    survey_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    survey = await _get_survey_detail(survey_id, user.user_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return SurveyOut(**survey)
+
+
+@app.post("/surveys", response_model=SurveyOut, status_code=201)
+async def create_survey_route(
+    body: SurveyCreate,
+    user: UserProfile = Depends(require_admin),
+):
+    survey = await _create_survey(user.user_id, body)
+    detail = await _get_survey_detail(survey["id"], user.user_id)
+    return SurveyOut(**detail)
+
+
+@app.patch("/surveys/{survey_id}/status")
+async def update_survey_status_route(
+    survey_id: str,
+    body: SurveyStatusUpdate,
+    user: UserProfile = Depends(verify_token),
+):
+    db = await get_db()
+    result = await (
+        db.table("surveys")
+        .select("created_by, status")
+        .eq("id", survey_id)
+        .maybe_single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    profile = await get_profile(user.user_id)
+    is_creator = result.data["created_by"] == user.user_id
+    is_admin = profile and profile.get("role") == "admin"
+    if not (is_creator or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    current = result.data["status"]
+    if (current, body.status) not in _VALID_SURVEY_TRANSITIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot transition survey from '{current}' to '{body.status}'",
+        )
+    await db.table("surveys").update({"status": body.status}).eq("id", survey_id).execute()
+    return {"ok": True}
+
+
+@app.post("/surveys/{survey_id}/responses", status_code=201)
+async def submit_survey_response_route(
+    survey_id: str,
+    body: SurveyResponseCreate,
+    user: UserProfile = Depends(verify_token),
+):
+    try:
+        response = await _submit_response(survey_id, user.user_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"response_id": response["id"]}
+
+
+@app.get("/surveys/{survey_id}/results", response_model=SurveyResultsOut)
+async def get_survey_results_route(
+    survey_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    db = await get_db()
+    result = await (
+        db.table("surveys").select("created_by").eq("id", survey_id).maybe_single().execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    profile = await get_profile(user.user_id)
+    is_creator = result.data["created_by"] == user.user_id
+    is_admin = profile and profile.get("role") == "admin"
+    if not (is_creator or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    results = await _get_results(survey_id)
+    return SurveyResultsOut(**results)
 
 
 # ---------------------------------------------------------------------------

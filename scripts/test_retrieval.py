@@ -55,7 +55,16 @@ async def test(query: str, top_k: int) -> None:
     for c in fts_chunks[:3]:
         print(f"  [{c.doc_type}] {c.guideline_title[:60]} | chunk_index={c.chunk_index}")
 
-    # 4. Drug direct lookup
+    # 4. Phrase-match lookup (proper-noun / trial-acronym injection)
+    from backend.rag import _extract_proper_noun_phrases
+    print(f"\nExtracted phrases: {_extract_proper_noun_phrases(query)}")
+    phrase_chunks = await rag._phrase_match_lookup(query)
+    p_counts = Counter(c.doc_type for c in phrase_chunks)
+    print(f"Phrase-match lookup ({len(phrase_chunks)} chunks): {dict(p_counts)}")
+    for c in phrase_chunks[:3]:
+        print(f"  [{c.doc_type}] {c.guideline_title[:60]} | chunk_index={c.chunk_index}")
+
+    # 5. Drug direct lookup
     if settings.enable_drug_retrieval:
         direct_chunks = await rag._drug_direct_lookup(query)
         d_counts = Counter(c.doc_type for c in direct_chunks)
@@ -65,11 +74,19 @@ async def test(query: str, top_k: int) -> None:
     else:
         direct_chunks = []
 
-    # 5. RRF merge
+    # 6. RRF merge + injection (same logic as _hybrid_search)
     from backend.rag import _rrf_merge
     merged = _rrf_merge(qdrant_chunks, fts_chunks, settings.rrf_k, top_k or settings.retrieval_top_k)
-    # Inject direct chunks (same logic as _hybrid_search)
     seen_ids = {c.id for c in merged}
+    phrase_inject_k = max(3, settings.retrieval_top_k // 4)
+    phrase_injected = 0
+    for c in phrase_chunks:
+        if phrase_injected >= phrase_inject_k:
+            break
+        if c.id not in seen_ids:
+            merged.append(c)
+            seen_ids.add(c.id)
+            phrase_injected += 1
     drug_inject_k = max(2, settings.retrieval_top_k // 3)
     injected = 0
     for c in direct_chunks:
@@ -80,7 +97,7 @@ async def test(query: str, top_k: int) -> None:
             seen_ids.add(c.id)
             injected += 1
     m_counts = Counter(c.doc_type for c in merged)
-    print(f"\nAfter RRF+inject ({len(merged)} chunks, {injected} direct injected): {dict(m_counts)}")
+    print(f"\nAfter RRF+inject ({len(merged)} chunks, phrase={phrase_injected} drug={injected}): {dict(m_counts)}")
 
     # 6. Rerank
     reranked = await rag._rerank(query, merged)
