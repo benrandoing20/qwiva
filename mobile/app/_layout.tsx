@@ -74,6 +74,7 @@ function ThemedShell() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="case" options={{ presentation: 'card' }} />
+        <Stack.Screen name="surveys/[id]" options={{ presentation: 'card' }} />
       </Stack>
     </>
   );

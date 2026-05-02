@@ -65,64 +65,62 @@ export default function AnswerCard({ answer, citations, isStreaming, isDone, sta
       {/* Always rendered so no DOM swap occurs when the first token arrives */}
       <StreamingText text={answer} isStreaming={isStreaming} citations={citations} />
 
-      {/* Sources — fade in when done */}
-      <div
-        className="transition-opacity duration-500"
-        style={{ opacity: isDone && uniqueCitations.length > 0 ? 1 : 0, pointerEvents: isDone && uniqueCitations.length > 0 ? 'auto' : 'none' }}
-      >
-        {uniqueCitations.length > 0 && (
-          <div className="pt-4 border-t border-brand-border">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest">
-                References
-              </p>
-              <Link
-                href="/learn"
-                className="text-xs text-brand-accent hover:text-brand-accent-hover transition-colors"
-              >
-                Learn this topic →
-              </Link>
-            </div>
-
-            <ol className="space-y-2.5">
-              {visible.map((c) => (
-                <li key={c.index} className="flex gap-2.5 items-start">
-                  <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 mt-0.5 text-[9px] font-bold text-brand-accent-hover bg-brand-accent/15 border border-brand-accent/25 rounded-full">
-                    {c.index}
-                  </span>
-                  <div className="min-w-0">
-                    {c.source_url ? (
-                      <a
-                        href={c.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-brand-accent hover:text-brand-accent-hover underline underline-offset-2 decoration-brand-accent/40 transition-colors inline-flex items-baseline gap-1 leading-snug"
-                      >
-                        {c.guideline_title}
-                        <span className="text-[10px] no-underline flex-shrink-0">↗</span>
-                      </a>
-                    ) : (
-                      <p className="text-xs text-brand-text/85 leading-snug">{c.guideline_title}</p>
-                    )}
-                    <p className="text-[11px] text-brand-subtle mt-0.5">
-                      {[c.publisher, c.year].filter(Boolean).join(' · ')}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-
-            {hiddenCount > 0 && (
-              <button
-                onClick={() => setShowAll((v) => !v)}
-                className="mt-2.5 text-xs text-brand-muted hover:text-brand-accent-hover transition-colors"
-              >
-                {showAll ? 'Show less' : `+${hiddenCount} more source${hiddenCount > 1 ? 's' : ''}`}
-              </button>
-            )}
+      {/* Sources — always visible whenever citations exist. Sits as a
+          sibling of StreamingText (NOT inside the unveil curtain), so the
+          curtain only reveals the answer text and refs stay statically
+          visible the entire time. */}
+      {uniqueCitations.length > 0 && (
+        <div className="pt-4 border-t border-brand-border">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-brand-muted uppercase tracking-widest">
+              References
+            </p>
+            <Link
+              href="/learn"
+              className="text-xs text-brand-accent hover:text-brand-accent-hover transition-colors"
+            >
+              Learn this topic →
+            </Link>
           </div>
-        )}
-      </div>
+
+          <ol className="space-y-2.5">
+            {visible.map((c) => (
+              <li key={c.index} className="flex gap-2.5 items-start">
+                <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 mt-0.5 text-[9px] font-bold text-brand-accent-hover bg-brand-accent/15 border border-brand-accent/25 rounded-full">
+                  {c.index}
+                </span>
+                <div className="min-w-0">
+                  {c.source_url ? (
+                    <a
+                      href={c.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-brand-accent hover:text-brand-accent-hover underline underline-offset-2 decoration-brand-accent/40 transition-colors inline-flex items-baseline gap-1 leading-snug"
+                    >
+                      {c.guideline_title}
+                      <span className="text-[10px] no-underline flex-shrink-0">↗</span>
+                    </a>
+                  ) : (
+                    <p className="text-xs text-brand-text/85 leading-snug">{c.guideline_title}</p>
+                  )}
+                  <p className="text-[11px] text-brand-subtle mt-0.5">
+                    {[c.publisher, c.year].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              className="mt-2.5 text-xs text-brand-muted hover:text-brand-accent-hover transition-colors"
+            >
+              {showAll ? 'Show less' : `+${hiddenCount} more source${hiddenCount > 1 ? 's' : ''}`}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* DISABLED: Follow-up suggestions — uncomment to re-enable
       <div

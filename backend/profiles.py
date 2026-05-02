@@ -10,7 +10,7 @@ async def get_profile(user_id: str) -> dict | None:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 async def get_profile_or_create(user_id: str, email: str | None = None) -> dict:

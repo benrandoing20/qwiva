@@ -253,22 +253,19 @@ function AskContent() {
                   multiline
                   maxLength={500}
                 />
-                <View style={styles.actionRow}>
-                  <View style={styles.actionSpacer} />
-                  <Animated.View style={[styles.sendButton, sendButtonStyle]}>
-                    <TouchableOpacity
-                      style={styles.sendButtonInner}
-                      onPress={handleSubmit}
-                      disabled={!hasQueryText || isStreaming}
-                      activeOpacity={0.85}
-                    >
-                      <ArrowUp
-                        size={18}
-                        color={hasQueryText ? theme.textInverse : theme.textMuted}
-                      />
-                    </TouchableOpacity>
-                  </Animated.View>
-                </View>
+                <Animated.View style={[styles.sendButton, sendButtonStyle]}>
+                  <TouchableOpacity
+                    style={styles.sendButtonInner}
+                    onPress={handleSubmit}
+                    disabled={!hasQueryText || isStreaming}
+                    activeOpacity={0.85}
+                  >
+                    <ArrowUp
+                      size={18}
+                      color={hasQueryText ? theme.textInverse : theme.textMuted}
+                    />
+                  </TouchableOpacity>
+                </Animated.View>
               </View>
             </View>
         </Animated.View>
@@ -301,7 +298,7 @@ function makeStyles(theme: Theme) {
       justifyContent: 'center',
     },
     topBarLogo: {
-      width: 92,
+      width: 105,
       height: 24,
     },
 
@@ -378,10 +375,10 @@ function makeStyles(theme: Theme) {
       borderWidth: 1,
       borderColor: theme.border,
       borderRadius: 21,
-      paddingTop: 12,
-      paddingHorizontal: 12,
-      paddingBottom: 10,
-      flexDirection: 'column',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
       gap: 8,
       shadowColor: theme.navy,
       shadowOffset: { width: 0, height: 6 },
@@ -396,21 +393,18 @@ function makeStyles(theme: Theme) {
       shadowRadius: 22,
     },
     inputField: {
-      paddingHorizontal: 6,
-      paddingVertical: 4,
-      minHeight: 26,
-      maxHeight: 80,
+      flex: 1,
+      minHeight: 36,
+      maxHeight: 96,
       fontFamily: Fonts.sans,
       fontSize: 16,
+      lineHeight: 22,
       color: theme.text,
-      padding: 0,
+      paddingHorizontal: 0,
+      paddingTop: Platform.OS === 'ios' ? 8 : 6,
+      paddingBottom: Platform.OS === 'ios' ? 8 : 6,
+      textAlignVertical: 'center',
     },
-    actionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    actionSpacer: { flex: 1 },
     sendButton: {
       width: 36,
       height: 36,

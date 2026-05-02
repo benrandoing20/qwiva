@@ -525,7 +525,7 @@ export default function HomePage() {
               <div className="flex flex-col items-center justify-center h-full px-4 pb-24">
                 <div className="text-center mb-10">
                   <div className="flex justify-center mb-4">
-                    <BrandLogo width={280} height={80} className="h-20 w-auto" priority />
+                    <BrandLogo height={80} priority />
                   </div>
                   <p className="text-brand-muted text-base">
                     Kenya&apos;s clinical knowledge platform

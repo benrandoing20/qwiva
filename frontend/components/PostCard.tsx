@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { togglePostLike } from '@/lib/api'
 import SpecialtyBadge from '@/components/SpecialtyBadge'
 import FollowButton from '@/components/FollowButton'
@@ -44,6 +44,14 @@ export default function PostCard({ post, token, currentUserId, onUpdate }: Props
   const [liked, setLiked] = useState(post.viewer_liked)
   const [likeCount, setLikeCount] = useState(post.like_count)
   const [likeLoading, setLikeLoading] = useState(false)
+
+  // Sync local optimistic state when the parent supplies a fresh post
+  // (same id, updated fields). Without this, the same post rendered in two
+  // lists drifts: liking it in one card leaves the other card's heart stale.
+  useEffect(() => {
+    setLiked(post.viewer_liked)
+    setLikeCount(post.like_count)
+  }, [post.id, post.viewer_liked, post.like_count])
 
   async function handleLike() {
     if (likeLoading) return

@@ -63,6 +63,9 @@ export default function TakeSurveyPage() {
   const [submitted, setSubmitted] = useState(false)
   const [alreadyResponded, setAlreadyResponded] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // One-at-a-time pagination — survey questions are shown sequentially with
+  // Back/Next; submission only fires from the last question.
+  const [currentIndex, setCurrentIndex] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -92,33 +95,39 @@ export default function TakeSurveyPage() {
     setErrors((prev) => ({ ...prev, [questionId]: false }))
   }
 
-  function validate(): boolean {
-    if (!survey?.questions) return true
-    const newErrors: Record<string, boolean> = {}
-    let valid = true
-    for (const q of survey.questions) {
-      if (!q.is_required) continue
-      const a = answers[q.id]
-      const hasText = a?.answer_text && a.answer_text.trim().length > 0
-      const hasOptions = a?.answer_options && a.answer_options.length > 0
-      if (q.question_type === 'open_text' && !hasText) {
-        newErrors[q.id] = true
-        valid = false
-      } else if (q.question_type === 'scale' && !hasText) {
-        newErrors[q.id] = true
-        valid = false
-      } else if ((q.question_type === 'multiple_choice' || q.question_type === 'multi_select') && !hasOptions) {
-        newErrors[q.id] = true
-        valid = false
-      }
-    }
-    setErrors(newErrors)
-    return valid
+  function isQuestionAnswered(q: SurveyQuestion): boolean {
+    const a = answers[q.id]
+    const hasText = !!(a?.answer_text && a.answer_text.trim().length > 0)
+    const hasOptions = !!(a?.answer_options && a.answer_options.length > 0)
+    if (q.question_type === 'open_text' || q.question_type === 'scale') return hasText
+    return hasOptions
+  }
+
+  function validateQuestion(q: SurveyQuestion): boolean {
+    if (!q.is_required) return true
+    const ok = isQuestionAnswered(q)
+    setErrors((prev) => ({ ...prev, [q.id]: !ok }))
+    return ok
+  }
+
+  function handleNext() {
+    if (!survey?.questions) return
+    const q = survey.questions[currentIndex]
+    if (!validateQuestion(q)) return
+    setCurrentIndex((i) => Math.min(i + 1, (survey.questions?.length ?? 1) - 1))
+  }
+
+  function handleBack() {
+    setCurrentIndex((i) => Math.max(i - 1, 0))
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!validate() || !token || !id) return
+    if (!survey?.questions || !token || !id) return
+    // Validate the final question — earlier questions had their required
+    // checks enforced when the user advanced past them.
+    const last = survey.questions[currentIndex]
+    if (last && !validateQuestion(last)) return
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -204,6 +213,13 @@ export default function TakeSurveyPage() {
     )
   }
 
+  const questions = survey.questions ?? []
+  const totalQuestions = questions.length
+  const q = questions[currentIndex]
+  const isLast = currentIndex === totalQuestions - 1
+  const isFirst = currentIndex === 0
+  const progressPct = totalQuestions > 0 ? ((currentIndex + 1) / totalQuestions) * 100 : 0
+
   return (
     <div className="min-h-screen bg-brand-bg">
       <Navbar />
@@ -218,14 +234,34 @@ export default function TakeSurveyPage() {
           )}
         </div>
 
+        {/* Progress */}
+        {totalQuestions > 0 && (
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-brand-muted">
+                Question {currentIndex + 1} of {totalQuestions}
+              </span>
+              <span className="text-xs text-brand-subtle">
+                {Math.round(progressPct)}%
+              </span>
+            </div>
+            <div className="h-1.5 bg-brand-raised rounded-full overflow-hidden">
+              <div
+                className="h-full bg-brand-accent transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
-          {(survey.questions ?? []).map((q, i) => (
+          {q && (
             <div
               key={q.id}
-              className="bg-brand-surface border border-brand-border rounded-2xl p-5"
+              className="bg-brand-surface border border-brand-border rounded-2xl p-5 animate-fadeIn"
             >
               <p className="text-sm font-medium text-brand-text mb-1">
-                {i + 1}. {q.question_text}
+                {q.question_text}
                 {q.is_required && <span className="text-red-400 ml-1">*</span>}
               </p>
 
@@ -309,27 +345,37 @@ export default function TakeSurveyPage() {
                 </div>
               )}
             </div>
-          ))}
+          )}
 
           {submitError && (
             <p className="text-sm text-red-500 text-center">{submitError}</p>
           )}
 
-          <div className="flex gap-3 justify-end pt-2">
+          <div className="flex items-center justify-between gap-3 pt-2">
             <button
               type="button"
-              onClick={() => router.push('/surveys')}
+              onClick={() => isFirst ? router.push('/surveys') : handleBack()}
               className="text-sm px-5 py-2.5 rounded-xl bg-brand-raised text-brand-muted hover:text-brand-text transition-colors"
             >
-              Cancel
+              {isFirst ? 'Cancel' : '← Back'}
             </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="text-sm px-6 py-2.5 rounded-xl bg-brand-accent text-white font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
-            >
-              {submitting ? 'Submitting…' : 'Submit'}
-            </button>
+            {isLast ? (
+              <button
+                type="submit"
+                disabled={submitting}
+                className="text-sm px-6 py-2.5 rounded-xl bg-brand-accent text-white font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {submitting ? 'Submitting…' : 'Submit'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleNext}
+                className="text-sm px-6 py-2.5 rounded-xl bg-brand-accent text-white font-medium hover:opacity-90 transition-opacity"
+              >
+                Next →
+              </button>
+            )}
           </div>
         </form>
       </div>

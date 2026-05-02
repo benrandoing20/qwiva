@@ -6,6 +6,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   Linking,
+  Modal,
+  Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -61,6 +63,23 @@ export function ThreadView({ messages }: ThreadViewProps) {
     }
   }, [messages.length]);
 
+  // When the last assistant message finishes streaming, the ReferencesBlock
+  // mounts below the answer text. Re-scroll to bottom if the user was
+  // pinned, otherwise the refs render off-screen and look "missing".
+  const lastIsStreaming = messages[messages.length - 1]?.isStreaming ?? false;
+  useEffect(() => {
+    if (lastIsStreaming) return;
+    if (!userPinnedToBottomRef.current) return;
+    // Two RAFs: one to let RN flush the layout pass that adds the refs
+    // block, one more to let its measured height be reflected in the
+    // ScrollView's contentSize before we scroll.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ref.current?.scrollToEnd({ animated: true });
+      });
+    });
+  }, [lastIsStreaming]);
+
   return (
     <ScrollView
       ref={ref}
@@ -81,6 +100,7 @@ export function ThreadView({ messages }: ThreadViewProps) {
 
 function MessageBubble({ message, theme }: { message: ChatMessage; theme: Theme }) {
   const styles = makeStyles(theme);
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
 
   if (message.role === 'user') {
     return (
@@ -94,7 +114,6 @@ function MessageBubble({ message, theme }: { message: ChatMessage; theme: Theme 
 
   const showStatus =
     message.isStreaming && !message.content && !!message.statusMessage;
-  const isDone = !message.isStreaming;
 
   return (
     <View style={styles.assistantRow}>
@@ -110,47 +129,45 @@ function MessageBubble({ message, theme }: { message: ChatMessage; theme: Theme 
           citations={message.citations ?? []}
           isStreaming={!!message.isStreaming}
           theme={theme}
+          onCitationPress={setActiveCitation}
         />
       )}
-      {!message.isError && isDone && (message.citations?.length ?? 0) > 0 && (
-        <ReferencesBlock citations={message.citations ?? []} theme={theme} />
+      {/* Refs render as a sibling of AnswerMarkdown — outside the unveil
+          curtain — so they stay statically visible the entire time
+          (including during streaming). The curtain only reveals the
+          answer text; refs are not part of the reveal. */}
+      {!message.isError && (message.citations?.length ?? 0) > 0 && (
+        <ReferencesBlock
+          citations={message.citations ?? []}
+          theme={theme}
+          onCitationPress={setActiveCitation}
+        />
       )}
+      <CitationSheet
+        citation={activeCitation}
+        theme={theme}
+        onClose={() => setActiveCitation(null)}
+      />
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
 // References block — mirrors frontend/components/AnswerCard.tsx footer.
-// Renders citations as accent pills (matching the inline pill style); tapping
-// a pill expands a card with the full title, publisher · year, section, and
-// source link.
+// Renders each citation as an accent pill; tapping any pill opens the
+// shared `CitationSheet` (slide-up modal) with the full reference detail.
 // ---------------------------------------------------------------------------
-
-// Match the web's abbreviateCitation — produce a short label like "WHO 2024"
-// from publisher + year, falling back to a truncated guideline title.
-function abbreviateCitation(c: Citation): string {
-  const pub = c.publisher ?? '';
-  const acr =
-    pub.match(/\b(WHO|RCOG|KDIGO|NICE|CDC|AHA|ACC|ESC|FIGO|ICM|ACOG|ACSM|NHS|MOH|KEMRI)\b/i) ??
-    pub.match(/\(([A-Z]{2,6})\)/);
-  if (acr) return c.year ? `${acr[1].toUpperCase()} ${c.year}` : acr[1].toUpperCase();
-  const word = pub.split(/[\s,;(]/)[0];
-  if (word && word.length >= 2 && word.length <= 8) {
-    return c.year ? `${word} ${c.year}` : word;
-  }
-  const t = c.guideline_title ?? '';
-  return t.length > 14 ? t.slice(0, 14) + '…' : t || String(c.index);
-}
 
 function ReferencesBlock({
   citations,
   theme,
+  onCitationPress,
 }: {
   citations: Citation[];
   theme: Theme;
+  onCitationPress: (citation: Citation) => void;
 }) {
   const styles = makeStyles(theme);
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   // Dedup by guideline_title — backend dedup can miss when the same doc is
   // retrieved as two differently-indexed chunks.
@@ -159,70 +176,104 @@ function ReferencesBlock({
       arr.findIndex((x) => x.guideline_title === c.guideline_title) === i,
   );
 
-  const expanded = expandedIndex != null
-    ? unique.find((c) => c.index === expandedIndex)
-    : null;
-
   return (
     <View style={styles.referencesBlock}>
       <View style={styles.referencesHeader}>
         <Text style={styles.referencesTitle}>Sources</Text>
       </View>
-      <View style={styles.pillsWrap}>
+      <View style={styles.refList}>
         {unique.map((c) => {
-          const isActive = expandedIndex === c.index;
-          const label = abbreviateCitation(c);
+          const meta = [c.publisher, c.year].filter(Boolean).join(' · ');
           return (
             <TouchableOpacity
               key={`${c.index}-${c.guideline_title}`}
-              style={[styles.refPill, isActive && styles.refPillActive]}
+              style={styles.refRow}
               activeOpacity={0.7}
-              onPress={() =>
-                setExpandedIndex((prev) => (prev === c.index ? null : c.index))
-              }
+              onPress={() => onCitationPress(c)}
             >
-              <Text style={[styles.refPillIndex, isActive && styles.refPillIndexActive]}>
-                {c.index}
-              </Text>
-              <Text
-                style={[styles.refPillLabel, isActive && styles.refPillLabelActive]}
-                numberOfLines={1}
-              >
-                {label}
-              </Text>
+              <View style={styles.refRowPill}>
+                <Text style={styles.refRowPillText}>{c.index}</Text>
+              </View>
+              <View style={styles.refRowBody}>
+                <Text style={styles.refRowTitle} numberOfLines={3}>
+                  {c.guideline_title}
+                  {c.source_url ? <Text style={styles.refRowLink}>{'  ↗'}</Text> : null}
+                </Text>
+                {meta ? (
+                  <Text style={styles.refRowMeta} numberOfLines={1}>
+                    {meta}
+                  </Text>
+                ) : null}
+              </View>
             </TouchableOpacity>
           );
         })}
       </View>
-
-      {/* Expanded detail card — appears when a pill is tapped */}
-      {expanded && (
-        <View style={styles.expandedCard}>
-          <Text style={styles.expandedTitle} numberOfLines={3}>
-            {expanded.guideline_title}
-          </Text>
-          {(expanded.publisher || expanded.year) && (
-            <Text style={styles.expandedMeta} numberOfLines={1}>
-              {[expanded.publisher, expanded.year].filter(Boolean).join(' · ')}
-            </Text>
-          )}
-          {expanded.section ? (
-            <Text style={styles.expandedSection} numberOfLines={2}>
-              Section: {expanded.section}
-            </Text>
-          ) : null}
-          {expanded.source_url ? (
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => Linking.openURL(expanded.source_url!)}
-              style={styles.expandedLinkRow}
-            >
-              <Text style={styles.expandedLinkText}>View source ↗</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      )}
     </View>
+  );
+}
+
+// Bottom sheet that pops up when a citation pill is tapped — shows the
+// full guideline title, publisher · year, section, and a "View source"
+// link. Uses RN's built-in Modal with `animationType="slide"` and a
+// fully transparent backdrop so the page underneath stays visible
+// (no dark overlay). Tapping above the sheet dismisses.
+function CitationSheet({
+  citation,
+  theme,
+  onClose,
+}: {
+  citation: Citation | null;
+  theme: Theme;
+  onClose: () => void;
+}) {
+  const styles = makeStyles(theme);
+  const visible = citation !== null;
+
+  return (
+    <Modal
+      animationType="slide"
+      transparent
+      visible={visible}
+      onRequestClose={onClose}
+    >
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.sheetContainer} onPress={() => undefined}>
+          <View style={styles.sheetGrabber} />
+          {citation ? (
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.sheetEyebrow}>
+                Reference {citation.index}
+              </Text>
+              <Text style={styles.sheetTitle}>{citation.guideline_title}</Text>
+              {(citation.publisher || citation.year) && (
+                <Text style={styles.sheetMeta}>
+                  {[citation.publisher, citation.year].filter(Boolean).join(' · ')}
+                </Text>
+              )}
+              {citation.section ? (
+                <Text style={styles.sheetSection}>
+                  Section: {citation.section}
+                </Text>
+              ) : null}
+              {citation.source_url ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => Linking.openURL(citation.source_url!)}
+                  style={styles.sheetLinkRow}
+                >
+                  <Text style={styles.sheetLinkText}>View source ↗</Text>
+                </TouchableOpacity>
+              ) : null}
+            </ScrollView>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -337,79 +388,129 @@ function makeStyles(theme: Theme) {
       letterSpacing: 1.4,
       textTransform: 'uppercase',
     },
-    pillsWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 6,
+    // Full reference list — each row is the small numbered pill plus the
+    // guideline title and publisher · year. Tapping a row opens the
+    // shared CitationSheet with the full detail.
+    refList: {
+      gap: 10,
     },
-    refPill: {
+    refRow: {
       flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    refRowPill: {
+      minWidth: 22,
+      height: 22,
+      paddingHorizontal: 7,
+      borderRadius: 11,
       alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 9,
-      paddingVertical: 3,
-      borderRadius: 999,
+      justifyContent: 'center',
       backgroundColor: theme.pillBg,
-      // Match inline citation pill — no border, just translucent accent fill.
+      overflow: 'hidden',
+      marginTop: 1,
     },
-    refPillActive: {
-      backgroundColor: theme.accent,
-    },
-    refPillIndex: {
-      fontFamily: Fonts.sansBold,
-      fontSize: 10,
-      color: theme.accent,
-      opacity: 0.6,
-      lineHeight: 14,
-    },
-    refPillIndexActive: {
-      color: '#FFFFFF',
-      opacity: 0.85,
-    },
-    refPillLabel: {
+    refRowPillText: {
       fontFamily: Fonts.sansBold,
       fontSize: 11,
       color: theme.accent,
       lineHeight: 14,
-      letterSpacing: -0.05,
+      letterSpacing: -0.1,
     },
-    refPillLabelActive: {
-      color: '#FFFFFF',
+    refRowBody: {
+      flex: 1,
+      minWidth: 0,
     },
-    expandedCard: {
-      marginTop: 4,
-      padding: 12,
-      backgroundColor: theme.surface,
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: 12,
-      gap: 4,
-    },
-    expandedTitle: {
-      fontFamily: Fonts.sansBold,
+    refRowTitle: {
+      fontFamily: Fonts.sansMedium,
       fontSize: 13,
       color: theme.text,
       lineHeight: 18,
     },
-    expandedMeta: {
+    refRowLink: {
+      color: theme.accent,
+      fontSize: 11,
+    },
+    refRowMeta: {
       fontFamily: Fonts.sans,
       fontSize: 11,
       color: theme.textMuted,
+      marginTop: 2,
     },
-    expandedSection: {
+
+    // Citation bottom sheet — fully transparent backdrop so the page
+    // underneath stays visible (no dark overlay).
+    sheetBackdrop: {
+      flex: 1,
+      backgroundColor: 'transparent',
+      justifyContent: 'flex-end',
+    },
+    sheetContainer: {
+      backgroundColor: theme.surface,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: theme.border,
+      paddingTop: 8,
+      paddingBottom: 24,
+      maxHeight: '75%',
+      // Lift the sheet visually without needing a dim overlay.
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -6 },
+      shadowOpacity: 0.18,
+      shadowRadius: 18,
+      elevation: 12,
+    },
+    sheetGrabber: {
+      alignSelf: 'center',
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.border,
+      marginBottom: 8,
+    },
+    sheetScroll: {
+      paddingHorizontal: 20,
+    },
+    sheetContent: {
+      paddingTop: 8,
+      paddingBottom: 12,
+      gap: 6,
+    },
+    sheetEyebrow: {
+      fontFamily: Fonts.sansBold,
+      fontSize: 10,
+      color: theme.textMuted,
+      letterSpacing: 1.4,
+      textTransform: 'uppercase',
+      marginBottom: 4,
+    },
+    sheetTitle: {
+      fontFamily: Fonts.sansBold,
+      fontSize: 16,
+      color: theme.text,
+      lineHeight: 22,
+    },
+    sheetMeta: {
       fontFamily: Fonts.sans,
-      fontSize: 11,
+      fontSize: 12,
+      color: theme.textMuted,
+    },
+    sheetSection: {
+      fontFamily: Fonts.sans,
+      fontSize: 12,
       color: theme.textMuted,
       fontStyle: 'italic',
     },
-    expandedLinkRow: {
-      marginTop: 6,
+    sheetLinkRow: {
+      marginTop: 12,
       alignSelf: 'flex-start',
     },
-    expandedLinkText: {
+    sheetLinkText: {
       fontFamily: Fonts.sansBold,
-      fontSize: 12,
+      fontSize: 13,
       color: theme.accent,
     },
   });

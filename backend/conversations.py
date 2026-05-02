@@ -105,7 +105,7 @@ async def get_conversation(conversation_id: str, user_id: str) -> dict | None:
         .maybe_single()
         .execute()
     )
-    data = res.data
+    data = res.data if res else None
     _conv_set(conversation_id, user_id, data)
     return data
 

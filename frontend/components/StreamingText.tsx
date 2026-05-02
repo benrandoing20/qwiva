@@ -12,33 +12,21 @@ interface Props {
   citations?: Citation[]
 }
 
+// Continuous unveil tuning. Mirrors the mobile renderer.
+const REVEAL_MIN_VELOCITY = 120 // px/sec
+const REVEAL_MAX_VELOCITY = 900 // px/sec
+const REVEAL_VELOCITY_GAIN = 3.2 // velocity = clamp(buffer × gain)
+const REVEAL_MIN_LAG_PX = 22 // smallest gap we ever leave under the curtain
+const REVEAL_THRESHOLD_PX = 40 // wait until at least this much content arrives
+const GRADIENT_FADE_PX = 32
+
 export default function StreamingText({ text, isStreaming, citations }: Props) {
-  const targetRef = useRef('')
-  const [displayed, setDisplayed] = useState('')
-
-  // Keep targetRef current; on stream end immediately show full text
-  useEffect(() => {
-    targetRef.current = text
-    if (!isStreaming) {
-      setDisplayed(text)
-    }
-  }, [text, isStreaming])
-
-  // Smooth character drain — decouples bursty token delivery from what ReactMarkdown renders
-  useEffect(() => {
-    if (!isStreaming) return
-    const id = setInterval(() => {
-      setDisplayed(prev => {
-        const target = targetRef.current
-        if (prev.length >= target.length) return prev
-        const queued = target.length - prev.length
-        // Adaptive: stay near natural reading pace but catch up if queue builds
-        const n = queued > 200 ? 18 : queued > 80 ? 7 : 3
-        return target.slice(0, prev.length + n)
-      })
-    }, 16)
-    return () => clearInterval(id)
-  }, [isStreaming])
+  // The renderer no longer drains tokens character-by-character — the full
+  // (marker-trimmed) buffer is rendered immediately and a gradient mask
+  // continuously slides downward to unveil it. `displayed` is just the live
+  // text so existing memoised pieces (citation handlers, regexes) keep
+  // working without restructuring.
+  const displayed = text
 
   // Memoised so the `cite` function reference stays stable across the 16ms
   // setDisplayed renders. Without this, React unmounts/remounts cite nodes
@@ -64,7 +52,6 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
       }
 
       const label = abbreviateCitation(citation)
-      const chunk = citation.source_content || citation.excerpt
 
       return (
         <span
@@ -115,21 +102,6 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
               <span className="block text-[11px] text-brand-subtle mb-2">
                 {[citation.publisher, citation.year].filter(Boolean).join(' · ')}
               </span>
-              {chunk && (
-                <>
-                  <span className="block text-[10px] font-semibold text-brand-subtle uppercase tracking-wider mb-1">
-                    Retrieved excerpt
-                  </span>
-                  <span className="block text-[11px] text-brand-muted leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
-                    {chunk
-                      .replace(/\bchunks\b/g, 'references')
-                      .replace(/\bChunks\b/g, 'References')
-                      .replace(/\bchunk\b/g, 'reference')
-                      .replace(/\bChunk\b/g, 'Reference')
-                    }
-                  </span>
-                </>
-              )}
               {citation.source_url && (
                 <a
                   href={citation.source_url}
@@ -149,12 +121,94 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
   }), [citations])
 
   const compressed = compressCitations(displayed)
-  const normalised = normaliseCheckboxes(compressed)
+  // While streaming, hide unclosed markdown markers so the user never sees a
+  // stray `**` flash before its closer arrives.
+  const safe = isStreaming ? trimUnclosedMarkers(compressed) : compressed
+  const normalised = normaliseCheckboxes(safe)
   const processed = normalised.replace(/\[(\d+(?:-\d+)?)\]/g, '<cite data-n="$1">$1</cite>')
+
+  // ---- Continuous unveil mask -------------------------------------------
+  // We render the full buffered text immediately, then drag a gradient
+  // curtain downward at a constant pixel-per-second velocity. The curtain
+  // top trails the bottom of the content by REVEAL_BUFFER_LAG_PX so it
+  // never "catches up" mid-stream — the unveil stays continuous regardless
+  // of how bursty the SSE tokens arrive.
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [contentH, setContentH] = useState(0)
+  const [revealY, setRevealY] = useState(0)
+  const revealAnimRef = useRef<{ from: number; to: number; start: number; duration: number } | null>(null)
+  const rafRef = useRef<number | null>(null)
+
+  // Observe content height changes (text growth as tokens arrive).
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const h = entries[0]?.contentRect.height ?? 0
+      setContentH(h)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Schedule reveal animation whenever content grows or streaming flips.
+  // Velocity is adaptive: scales with how many pixels of content are currently
+  // hidden under the mask. Buffer big → fast catch-up. Buffer small → slow.
+  useEffect(() => {
+    if (contentH <= 0) return
+    if (isStreaming && contentH < REVEAL_THRESHOLD_PX) return
+
+    const baseTarget = isStreaming
+      ? Math.max(0, contentH - REVEAL_MIN_LAG_PX)
+      : contentH
+    const target = Math.max(revealY, baseTarget)
+    if (target <= revealY) return
+    const distance = target - revealY
+
+    const buffer = Math.max(0, contentH - revealY)
+    const velocity = Math.min(
+      REVEAL_MAX_VELOCITY,
+      Math.max(REVEAL_MIN_VELOCITY, buffer * REVEAL_VELOCITY_GAIN),
+    )
+    const duration = (distance / velocity) * 1000
+
+    revealAnimRef.current = {
+      from: revealY,
+      to: target,
+      start: performance.now(),
+      duration,
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    const tick = (now: number) => {
+      const a = revealAnimRef.current
+      if (!a) return
+      const t = a.duration > 0 ? Math.min(1, (now - a.start) / a.duration) : 1
+      const y = a.from + (a.to - a.from) * t
+      setRevealY((prev) => Math.max(prev, y))
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick)
+      } else {
+        rafRef.current = null
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+  }, [contentH, isStreaming, revealY])
+
+  // Clip the wrapper to the smooth `revealY` height so the bottom edge of
+  // the visible answer moves at the curtain's pace, not in jumps as
+  // contentH grows. Anything rendered as a sibling below this wrapper
+  // (e.g. the references block in AnswerCard) then slides down smoothly
+  // with the wrapper's height. Once revealY catches up to contentH the
+  // height equals contentH and nothing is clipped.
+  const heightStyle = contentH > 0 ? { height: revealY, overflow: 'hidden' as const } : undefined
+  const showFade = revealY > 0 && revealY < contentH
 
   return (
     <div
-      className="prose-stream-wrapper prose prose-sm max-w-none dark:prose-invert
+      className="prose-stream-wrapper relative prose prose-sm max-w-none dark:prose-invert
         prose-p:text-brand-text/90 prose-p:leading-7 prose-p:my-3
         prose-headings:text-brand-text prose-headings:font-semibold
         prose-strong:text-brand-text prose-strong:font-semibold
@@ -162,17 +216,76 @@ export default function StreamingText({ text, isStreaming, citations }: Props) {
         prose-code:text-brand-accent-hover prose-code:bg-brand-accent/12 prose-code:rounded prose-code:px-1
         prose-a:text-brand-accent-hover prose-a:no-underline hover:prose-a:underline"
       data-has-content={displayed.length > 0 ? '' : undefined}
+      style={heightStyle}
     >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        components={mdComponents as any}
-      >
-        {processed}
-      </ReactMarkdown>
+      <div ref={contentRef}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeRaw]}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          components={mdComponents as any}
+        >
+          {processed}
+        </ReactMarkdown>
+      </div>
+      {/* Soft fade at the bottom edge of the visible region — keeps the
+          curtain edge from looking like a hard cutoff. Only shown while
+          there's still content beyond revealY (i.e. the curtain is
+          actively trailing). */}
+      {showFade && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-transparent to-brand-bg"
+          style={{ height: GRADIENT_FADE_PX }}
+        />
+      )}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Strip unclosed markdown markers from the live stream so the user never
+// sees raw `**`, `__`, `[`, `` ` `` characters before they're closed. The
+// trimmer scans for paired markers and link/image brackets and cuts the
+// text back to the last fully-balanced position.
+// ---------------------------------------------------------------------------
+const PAIR_MARKERS = ['**', '__', '~~', '`'] as const
+
+function findUnclosedPair(text: string, marker: string): number | null {
+  const positions: number[] = []
+  let i = 0
+  while ((i = text.indexOf(marker, i)) !== -1) {
+    positions.push(i)
+    i += marker.length
+  }
+  return positions.length % 2 === 1 ? positions[positions.length - 1] : null
+}
+
+function trimUnclosedMarkers(text: string): string {
+  if (!text) return text
+  let cutoff = text.length
+  for (const m of PAIR_MARKERS) {
+    const pos = findUnclosedPair(text, m)
+    if (pos !== null && pos < cutoff) cutoff = pos
+  }
+  // Unclosed link / image: a `[` with no `]`, or `[…](` with no `)`.
+  const lastOpenBracket = text.lastIndexOf('[')
+  if (lastOpenBracket !== -1) {
+    const afterBracket = text.slice(lastOpenBracket)
+    const citationLike = /^\[\d+(?:-\d+)?\]/.test(afterBracket)
+    if (!citationLike) {
+      const closeBracketRel = afterBracket.indexOf(']')
+      if (closeBracketRel === -1) {
+        if (lastOpenBracket < cutoff) cutoff = lastOpenBracket
+      } else {
+        const afterClose = afterBracket.slice(closeBracketRel + 1)
+        if (afterClose.startsWith('(') && !afterClose.includes(')')) {
+          if (lastOpenBracket < cutoff) cutoff = lastOpenBracket
+        }
+      }
+    }
+  }
+  return text.slice(0, cutoff).replace(/\s+$/, '')
 }
 
 // ---------------------------------------------------------------------------

@@ -129,12 +129,12 @@ async def get_survey_detail(survey_id: str, user_id: str) -> dict | None:
         .execute(),
     )
 
-    if not survey_result.data:
+    if not survey_result or not survey_result.data:
         return None
 
     survey = survey_result.data
     survey["questions"] = questions_result.data or []
-    survey["has_responded"] = response_result.data is not None
+    survey["has_responded"] = response_result is not None and response_result.data is not None
     return survey
 
 
@@ -149,7 +149,7 @@ async def submit_response(survey_id: str, user_id: str, body: SurveyResponseCrea
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing and existing.data:
         raise ValueError("Already responded")
 
     response_result = await (
@@ -191,7 +191,7 @@ async def get_results(survey_id: str) -> dict | None:
         .execute(),
     )
 
-    if not survey_result.data:
+    if not survey_result or not survey_result.data:
         return None
 
     survey = survey_result.data

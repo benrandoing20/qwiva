@@ -50,16 +50,6 @@ export default function Navbar({ onToggleSidebar, onNewChat }: NavbarProps) {
             Search
           </Link>
           <Link
-            href="/community"
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              pathname?.startsWith('/community')
-                ? 'text-brand-text bg-brand-raised'
-                : 'text-brand-muted hover:text-brand-text'
-            }`}
-          >
-            Community
-          </Link>
-          <Link
             href="/surveys"
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
               pathname?.startsWith('/surveys')

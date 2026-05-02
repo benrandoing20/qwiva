@@ -131,6 +131,8 @@ async def get_posts_by_author(
 async def toggle_post_like(post_id: str, user_id: str) -> bool:
     """Toggle like. Returns True if now liked, False if unliked."""
     db = await get_db()
+    # supabase-py's .maybe_single().execute() returns None (not a response
+    # with data=None) when no row matches — guard accordingly.
     existing = (
         await db.table("post_likes")
         .select("post_id")
@@ -139,7 +141,7 @@ async def toggle_post_like(post_id: str, user_id: str) -> bool:
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing and existing.data:
         await (
             db.table("post_likes").delete().eq("post_id", post_id).eq("user_id", user_id).execute()
         )
@@ -159,7 +161,7 @@ async def toggle_comment_like(comment_id: str, user_id: str) -> bool:
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing and existing.data:
         await (
             db.table("comment_likes")
             .delete()
@@ -257,7 +259,7 @@ async def is_following(follower_id: str, following_id: str) -> bool:
         .maybe_single()
         .execute()
     )
-    return result.data is not None
+    return result is not None and result.data is not None
 
 
 _PROFILE_FIELDS = (

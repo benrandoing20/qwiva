@@ -126,7 +126,7 @@ function LoginForm() {
         {/* Brand */}
         <div className="text-center mb-10">
           <div className="flex justify-center mb-4">
-            <BrandLogo width={180} height={64} className="h-14 w-auto" priority />
+            <BrandLogo height={64} priority />
           </div>
           <p className="text-sm text-brand-muted">Kenya&apos;s clinical knowledge platform</p>
         </div>

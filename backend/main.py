@@ -444,7 +444,8 @@ async def like_comment(
     liked = await toggle_comment_like(comment_id, user.user_id)
     db = await get_db()
     row = await db.table("comments").select("like_count").eq("id", comment_id).maybe_single().execute()
-    return LikeResponse(liked=liked, like_count=(row.data or {}).get("like_count", 0))
+    like_count = (row.data or {}).get("like_count", 0) if row else 0
+    return LikeResponse(liked=liked, like_count=like_count)
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +591,7 @@ async def update_survey_status_route(
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Survey not found")
     profile = await get_profile(user.user_id)
     is_creator = result.data["created_by"] == user.user_id
@@ -629,7 +630,7 @@ async def get_survey_results_route(
     result = await (
         db.table("surveys").select("created_by").eq("id", survey_id).maybe_single().execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Survey not found")
     profile = await get_profile(user.user_id)
     is_creator = result.data["created_by"] == user.user_id

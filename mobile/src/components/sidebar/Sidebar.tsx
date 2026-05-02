@@ -238,7 +238,7 @@ function makeStyles(theme: Theme) {
       marginBottom: 14,
     },
     brandLogo: {
-      width: 132,
+      width: 141,
       height: 32,
     },
     themeToggle: {

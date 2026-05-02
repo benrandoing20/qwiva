@@ -55,6 +55,18 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="discover"
+        options={{
+          tabBarLabel: ({ focused }) => <TabLabel label="Discover" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="surveys"
+        options={{
+          tabBarLabel: ({ focused }) => <TabLabel label="Surveys" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
         name="me"
         options={{
           tabBarLabel: ({ focused }) => <TabLabel label="Me" focused={focused} />,

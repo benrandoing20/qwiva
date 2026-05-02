@@ -633,30 +633,23 @@ class QwivaRAG:
         log.info("PHRASE MATCH: candidates %s", phrases)
 
         db = await get_db()
-        s = self._settings
-        select_cols = (
-            "id, content, guideline_title, chapter_title, pub_year, "
-            "issuing_body, issuing_body_canonical, chunk_index, source_url, iris_url, "
-            "evidence_tier, grade_strength, grade_direction, chunk_type, is_current_version"
-        )
 
-        # Up to 4 phrases × 2 tables = 8 parallel ilike scans, each capped at 4 rows.
-        # Order by content length asc so chunks focused on the phrase rank above
-        # chunks that mention it incidentally in a long passage.
-        async def _scan(table: str, phrase: str):
-            return await (
-                db.table(table)
-                .select(select_cols)
-                .ilike("content", f"%{phrase}%")
-                .limit(4)
-                .execute()
-            )
+        # Use the FTS RPCs `search_cpg_fts` / `search_pubmed_fts` — they're
+        # `SECURITY DEFINER` and bypass RLS, returning in ~300-500ms.
+        # Direct PostgREST `.filter("fts", ...)` on the 380k-row
+        # guideline_chunks table runs the same query in ~8 seconds because
+        # PostgREST evaluates RLS for every candidate row. Same RPCs that
+        # `_fts_search` uses, just called with the phrase instead of the
+        # full user query — gives us AND-mode token match scoped to the
+        # phrase tokens, which is the recall behaviour we want.
+        async def _scan(rpc: str, phrase: str):
+            return await db.rpc(rpc, {"query_text": phrase, "match_count": 4}).execute()
 
         coros = []
         phrase_for_coro: list[str] = []
         for phrase in phrases[:4]:
-            for table in (s.cpg_chunk_table, s.guideline_chunk_table):
-                coros.append(_scan(table, phrase))
+            for rpc in ("search_cpg_fts", "search_pubmed_fts"):
+                coros.append(_scan(rpc, phrase))
                 phrase_for_coro.append(phrase)
 
         results = await asyncio.gather(*coros, return_exceptions=True)

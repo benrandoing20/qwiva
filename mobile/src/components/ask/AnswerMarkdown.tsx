@@ -1,11 +1,17 @@
-// Streaming markdown renderer for assistant answers — mirrors the web's
-// StreamingText component (frontend/components/StreamingText.tsx) at a
-// React Native level: gradual character drain decouples bursty token
-// delivery from render cadence, citation runs are compressed and rendered
-// as inline accent-tinted pills, and the rest of the markdown is rendered
-// via react-native-markdown-display with theme-aware styles.
+// Streaming markdown renderer for assistant answers. Replaces the previous
+// per-character "typewriter" drain with a word-level reveal that feels closer
+// to OpenEvidence: tokens are buffered as they arrive, then flushed one word
+// at a time on a ~80 ms cadence. Each emerging paragraph fades in via a
+// Reanimated `entering` animation so the user never sees a hard chunk dump —
+// just a smooth, continuous fade as content keeps arriving.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useFrameCallback,
+  useSharedValue,
+} from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import Markdown, { type ASTNode } from 'react-native-markdown-display';
 import { Fonts } from '@/constants';
 import type { Citation } from '@/types';
@@ -16,6 +22,7 @@ interface Props {
   citations: Citation[];
   isStreaming: boolean;
   theme: Theme;
+  onCitationPress?: (citation: Citation) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +50,62 @@ function compressCitations(text: string): string {
   });
 }
 
+// While the model is mid-formatting, the buffered text can contain markdown
+// openers that haven't been closed yet (e.g. `**bold` with no trailing `**`).
+// If we hand that to the renderer the user sees the literal `**` characters
+// flash on screen until the closer arrives. To avoid that, we trim the
+// displayed text back to the last position where every paired marker is
+// balanced and there's no in-progress link (`[…]…` without `)`).
+const PAIR_MARKERS = ['**', '__', '~~', '`'];
+
+function findUnclosedPair(text: string, marker: string): number | null {
+  const positions: number[] = [];
+  let i = 0;
+  while ((i = text.indexOf(marker, i)) !== -1) {
+    positions.push(i);
+    i += marker.length;
+  }
+  return positions.length % 2 === 1
+    ? positions[positions.length - 1]
+    : null;
+}
+
+function trimUnclosedMarkers(text: string): string {
+  if (!text) return text;
+  let cutoff = text.length;
+  for (const m of PAIR_MARKERS) {
+    const pos = findUnclosedPair(text, m);
+    if (pos !== null && pos < cutoff) cutoff = pos;
+  }
+  // Unclosed link / image: a `[` that doesn't yet have a matching `]`, or a
+  // `](` that doesn't yet have its closing `)`.
+  const lastOpenBracket = text.lastIndexOf('[');
+  if (lastOpenBracket !== -1) {
+    const afterBracket = text.slice(lastOpenBracket);
+    // Citation pills like `[1]` or `[1-3]` are fine — they always close
+    // quickly and we don't want to hide them.
+    const citationLike = /^\[\d+(?:-\d+)?\]/.test(afterBracket);
+    if (!citationLike) {
+      // Find ']' for this open bracket. If missing, hide everything from
+      // the bracket onward.
+      const closeBracketRel = afterBracket.indexOf(']');
+      if (closeBracketRel === -1) {
+        if (lastOpenBracket < cutoff) cutoff = lastOpenBracket;
+      } else {
+        // We have `[…]`; if the next two chars are `(`, we're in a link and
+        // need to wait for the matching `)`.
+        const afterClose = afterBracket.slice(closeBracketRel + 1);
+        if (afterClose.startsWith('(') && !afterClose.includes(')')) {
+          if (lastOpenBracket < cutoff) cutoff = lastOpenBracket;
+        }
+      }
+    }
+  }
+  // Trim any trailing whitespace introduced by the cut so we don't leave a
+  // ragged blank tail.
+  return text.slice(0, cutoff).replace(/\s+$/, '');
+}
+
 // Mirror web's checkbox normaliser. Strips ☐ and reformats inline lists into
 // real markdown bullets so the renderer treats them as a list.
 function normaliseCheckboxes(text: string): string {
@@ -65,8 +128,9 @@ function normaliseCheckboxes(text: string): string {
 
 const CITATION_RE = /\[(\d+)(?:-(\d+))?\]/g;
 
-// Mirrors frontend/components/StreamingText.tsx#abbreviateCitation — turns
-// publisher + year into a short label like "WHO 2024".
+// Mirrors web's abbreviateCitation in StreamingText.tsx: produces a short
+// publisher/year label like "WHO 2023" so the inline pill has body and
+// matches the OpenEvidence-style appearance.
 function abbreviateCitation(c: Citation): string {
   const pub = c.publisher ?? '';
   const acr =
@@ -81,131 +145,171 @@ function abbreviateCitation(c: Citation): string {
   return t.length > 12 ? t.slice(0, 12) + '…' : t || String(c.index);
 }
 
+// Inline citation pill — number + publisher acronym. Rendered as a `<View>`
+// (not a `<Text>`) so the rounded background actually clips: RN's `<Text>`
+// drops `borderRadius` on its `backgroundColor` when the Text is nested
+// inside another Text (which is what the markdown paragraph wraps us in),
+// and ignores `padding` on nested Text on iOS. Putting the Text *inside* a
+// View lets the View clip reliably on both iOS and Android. `alignSelf:
+// 'baseline'` keeps the pill aligned with the surrounding text line.
+//
+// Tap behaviour: defers to the parent's `onPress` callback (which opens a
+// bottom sheet); falls back to opening source_url directly only when no
+// callback is wired.
 function CitationPill({
   indexLabel,
   citation,
   theme,
+  onPress,
 }: {
   indexLabel: string;
   citation?: Citation;
   theme: Theme;
+  onPress?: (citation: Citation) => void;
 }) {
   const styles = makePillStyles(theme);
-  // Inline pill — solid translucent accent with the number + publisher
-  // acronym side by side, e.g. "1 WHO 2024". The wrapping Text inherits
-  // the surrounding paragraph baseline so it sits on the line.
-  const sub = citation ? abbreviateCitation(citation) : null;
+  const label = citation ? abbreviateCitation(citation) : null;
+  const handlePress = citation
+    ? onPress
+      ? () => onPress(citation)
+      : citation.source_url
+        ? () => Linking.openURL(citation.source_url!)
+        : undefined
+    : undefined;
   return (
-    <Text
+    <Pressable
       style={styles.pill}
-      onPress={
-        citation?.source_url ? () => Linking.openURL(citation.source_url!) : undefined
-      }
-      suppressHighlighting
+      onPress={handlePress}
+      disabled={!handlePress}
     >
-      <Text style={styles.pillIndex}>{indexLabel}</Text>
-      {sub ? <Text style={styles.pillLabel}>{` ${sub}`}</Text> : null}
-    </Text>
+      <Text style={styles.pillText}>
+        <Text style={styles.pillNum}>{indexLabel}</Text>
+        {label ? <Text>{` ${label}`}</Text> : null}
+      </Text>
+    </Pressable>
   );
 }
 
 function makePillStyles(theme: Theme) {
   return StyleSheet.create({
     pill: {
-      fontFamily: Fonts.sansBold,
-      fontSize: 10,
-      color: theme.accent,
+      // Explicit `height` + `borderRadius = height / 2` is what produces a
+      // true stadium shape, regardless of the text glyph metrics inside.
+      height: 18,
+      paddingHorizontal: 7,
+      borderRadius: 9,
       backgroundColor: theme.pillBg,
-      borderRadius: 999,
+      flexDirection: 'row',
+      alignItems: 'center',
+      // Sit on the text baseline so the pill flows inline with the
+      // surrounding paragraph instead of stretching the line height.
+      alignSelf: 'baseline',
       overflow: 'hidden',
-      paddingHorizontal: 6,
-      paddingVertical: 1,
     },
-    pillIndex: {
+    pillText: {
       fontFamily: Fonts.sansBold,
       fontSize: 10,
+      lineHeight: 14,
       color: theme.accent,
+    },
+    pillNum: {
       opacity: 0.6,
-    },
-    pillLabel: {
-      fontFamily: Fonts.sansBold,
-      fontSize: 10,
-      color: theme.accent,
-      letterSpacing: -0.05,
     },
   });
 }
 
-// Take a raw string fragment (from the markdown text node) and split it into
-// alternating plain-text and citation-pill nodes.
-function renderTextWithCitations(
-  raw: string,
-  citations: Citation[],
-  theme: Theme,
-  baseStyle: object,
-): React.ReactNode {
-  if (!raw.includes('[')) return raw;
-  const out: React.ReactNode[] = [];
+
+// Tokenise a raw string fragment into alternating word / whitespace / pill
+// nodes. The render layer then wraps each *word* in an Animated.Text with
+// FadeIn so newly-arrived words gracefully unveil while older ones stay
+// solid. Whitespace and punctuation aren't animated — only the meaningful
+// content is, which is what produces the OpenEvidence-style reveal.
+type Segment =
+  | { kind: 'word'; value: string }
+  | { kind: 'ws'; value: string }
+  | { kind: 'pill'; indexLabel: string; citation?: Citation };
+
+function tokenize(raw: string, citations: Citation[]): Segment[] {
+  const out: Segment[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
   CITATION_RE.lastIndex = 0;
-  while ((m = CITATION_RE.exec(raw)) !== null) {
-    if (m.index > last) {
-      out.push(<Text key={`t-${last}`} style={baseStyle}>{raw.slice(last, m.index)}</Text>);
+
+  function pushText(s: string) {
+    if (!s) return;
+    // Split into runs of whitespace vs non-whitespace ("words"). A "word"
+    // here is anything between whitespace boundaries — punctuation rides
+    // along with the adjacent word, which keeps fade timing natural.
+    const re = /(\s+)/g;
+    let cursor = 0;
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(s)) !== null) {
+      if (mm.index > cursor) {
+        out.push({ kind: 'word', value: s.slice(cursor, mm.index) });
+      }
+      out.push({ kind: 'ws', value: mm[0] });
+      cursor = mm.index + mm[0].length;
     }
+    if (cursor < s.length) {
+      out.push({ kind: 'word', value: s.slice(cursor) });
+    }
+  }
+
+  while ((m = CITATION_RE.exec(raw)) !== null) {
+    if (m.index > last) pushText(raw.slice(last, m.index));
     const start = parseInt(m[1], 10);
     const end = m[2] ? parseInt(m[2], 10) : start;
     const indexLabel = end === start ? String(start) : `${start}-${end}`;
-    const cite = citations.find((c) => c.index === start);
-    out.push(
-      <CitationPill
-        key={`c-${m.index}`}
-        indexLabel={indexLabel}
-        citation={cite}
-        theme={theme}
-      />,
-    );
+    const citation = citations.find((c) => c.index === start);
+    out.push({ kind: 'pill', indexLabel, citation });
     last = m.index + m[0].length;
   }
-  if (last < raw.length) {
-    out.push(<Text key={`t-${last}`} style={baseStyle}>{raw.slice(last)}</Text>);
-  }
-  return <>{out}</>;
+  if (last < raw.length) pushText(raw.slice(last));
+  return out;
 }
 
-export function AnswerMarkdown({ content, citations, isStreaming, theme }: Props) {
-  // ---- Smooth character drain (matches web) -------------------------------
-  const targetRef = useRef('');
-  const [displayed, setDisplayed] = useState('');
+// ---------------------------------------------------------------------------
+// Continuous unveil: render the full buffered answer immediately and slide a
+// gradient mask downward as fast as we can without ever popping content
+// in. Velocity is *adaptive* — proportional to the buffer (i.e. the pixels
+// of content currently hidden under the mask). When tokens arrive in bursts
+// the buffer grows and the mask accelerates to keep up; when streaming
+// pauses the buffer shrinks and the mask slows to a crawl, holding the
+// minimum lag so the curtain never overtakes the content edge.
+// ---------------------------------------------------------------------------
+// Tuning. The curtain reveals content at `velocity` px/sec, where velocity
+// scales with how much content is currently hidden under the mask. We
+// deliberately keep the ceiling LOW so that when a big chunk lands mid-
+// stream (e.g. a paragraph all at once after a markdown marker closes)
+// the curtain doesn't race across it — that's what reads as "chunk
+// dumping". A lower ceiling means content sometimes sits buffered for an
+// extra fraction of a second, but the fade is always smooth.
+const REVEAL_MIN_VELOCITY = 60; // px/sec — slow floor when buffer is tiny
+const REVEAL_MAX_VELOCITY = 180; // px/sec — perceptible ceiling, no racing
+const REVEAL_VELOCITY_GAIN = 1.0; // velocity = clamp(buffer × gain)
+const REVEAL_MIN_LAG_PX = 28; // smallest gap we ever leave under the curtain
+const REVEAL_THRESHOLD_PX = 40; // wait until at least this much content arrives
+const GRADIENT_FADE_PX = 48; // height of the soft transparent→bg edge
 
-  useEffect(() => {
-    targetRef.current = content;
-    if (!isStreaming) setDisplayed(content);
-  }, [content, isStreaming]);
-
-  useEffect(() => {
-    if (!isStreaming) return;
-    const id = setInterval(() => {
-      setDisplayed((prev) => {
-        const target = targetRef.current;
-        if (prev.length >= target.length) return prev;
-        const queued = target.length - prev.length;
-        const n = queued > 200 ? 18 : queued > 80 ? 7 : 3;
-        return target.slice(0, prev.length + n);
-      });
-    }, 16);
-    return () => clearInterval(id);
-  }, [isStreaming]);
-
+export function AnswerMarkdown({
+  content,
+  citations,
+  isStreaming,
+  theme,
+  onCitationPress,
+}: Props) {
   const processed = useMemo(() => {
-    return normaliseCheckboxes(compressCitations(displayed));
-  }, [displayed]);
+    // Order matters: compress citations first so trimUnclosedMarkers sees
+    // the same `[N]` shapes the renderer will, then trim, then run the
+    // checkbox normaliser. Trim only kicks in while streaming — once the
+    // stream is done every marker is closed.
+    const compressed = compressCitations(content);
+    const safe = isStreaming ? trimUnclosedMarkers(compressed) : compressed;
+    return normaliseCheckboxes(safe);
+  }, [content, isStreaming]);
 
   const mdStyles = useMemo(() => makeMarkdownStyles(theme), [theme]);
 
-  // Custom rules: override the text renderer so we can splice citation pills
-  // into the inline text stream. The library passes us the raw node content
-  // and inherited styles; we return a Text fragment with mixed children.
   const rules = useMemo(
     () => ({
       text: (
@@ -215,11 +319,30 @@ export function AnswerMarkdown({ content, citations, isStreaming, theme }: Props
         _styles: Record<string, object>,
         inheritedStyles: object = {},
       ): React.ReactNode => {
-        const content = (node as { content?: string }).content ?? '';
-        const baseStyle = { ...inheritedStyles };
+        const raw = (node as { content?: string }).content ?? '';
+        const segs = tokenize(raw, citations);
         return (
-          <Text key={node.key} style={baseStyle}>
-            {renderTextWithCitations(content, citations, theme, baseStyle)}
+          <Text key={node.key} style={inheritedStyles}>
+            {segs.map((seg, i) => {
+              if (seg.kind === 'ws') return seg.value;
+              const key = `n-${node.key}-${i}`;
+              if (seg.kind === 'pill') {
+                return (
+                  <CitationPill
+                    key={key}
+                    indexLabel={seg.indexLabel}
+                    citation={seg.citation}
+                    theme={theme}
+                    onPress={onCitationPress}
+                  />
+                );
+              }
+              return (
+                <Text key={key} style={inheritedStyles}>
+                  {seg.value}
+                </Text>
+              );
+            })}
           </Text>
         );
       },
@@ -239,23 +362,179 @@ export function AnswerMarkdown({ content, citations, isStreaming, theme }: Props
           </Text>
         );
       },
+      // Wrap tables in a horizontal ScrollView so wide rows scroll instead
+      // of getting crushed into unreadable wraps on narrow phone widths.
+      // `TableScrollView` re-applies the user's last scrollX every time
+      // its children re-render — without this, every streaming token
+      // re-creates the table content, ScrollView's contentSize changes,
+      // and the user's scroll snaps back to the left edge.
+      table: (
+        node: ASTNode,
+        children: React.ReactNode,
+      ): React.ReactNode => (
+        <TableScrollView key={node.key} tableStyle={mdStyles.table}>
+          {children}
+        </TableScrollView>
+      ),
     }),
-    [citations, theme],
+    [citations, mdStyles.table, onCitationPress, theme],
   );
 
-  if (!displayed) {
+  // ---- Continuous unveil — mirrors the web's StreamingText -------------
+  // Strategy: the wrapper's height is animated to `revealY`, with
+  // overflow:hidden clipping anything beyond. Refs render as a sibling
+  // below the wrapper and slide down smoothly as the wrapper's height
+  // grows at the curtain's pace.
+  //
+  // Two defensive measures keep this stable on RN (which behaves
+  // differently from the browser's ResizeObserver):
+  //   1. `contentHShared` mirrors `contentH` so the worklet can gate
+  //      "apply animated height" on it being >0 — without that gate,
+  //      first render would set height to 0 immediately and we'd never
+  //      get an unconstrained layout pass to measure.
+  //   2. The inner View's onLayout is MONOTONIC: it only updates contentH
+  //      when the new measurement is larger. RN children can report a
+  //      shrunk frame after a parent constraint kicks in; ignoring those
+  //      shrinks keeps contentH locked to the largest natural size seen.
+  const [contentH, setContentH] = useState(0);
+  const revealY = useSharedValue(0);
+  const targetY = useSharedValue(0);
+  const contentHShared = useSharedValue(0);
+
+  useEffect(() => {
+    contentHShared.value = contentH;
+  }, [contentH, contentHShared]);
+
+  useEffect(() => {
+    if (contentH <= 0) return;
+    if (isStreaming && contentH < REVEAL_THRESHOLD_PX) return;
+    const baseTarget = isStreaming
+      ? Math.max(0, contentH - REVEAL_MIN_LAG_PX)
+      : contentH;
+    // Strictly monotonic — a list/table reflow can briefly shrink
+    // contentH and we don't want the curtain jumping up.
+    if (baseTarget > targetY.value) targetY.value = baseTarget;
+  }, [contentH, isStreaming, targetY]);
+
+  useFrameCallback((info) => {
+    const dt = Math.min(info.timeSincePreviousFrame ?? 16, 32);
+    const buffer = targetY.value - revealY.value;
+    if (buffer <= 0.5) return;
+    const velocity = Math.min(
+      REVEAL_MAX_VELOCITY,
+      Math.max(REVEAL_MIN_VELOCITY, buffer * REVEAL_VELOCITY_GAIN),
+    );
+    const step = (velocity * dt) / 1000;
+    revealY.value = Math.min(targetY.value, revealY.value + step);
+  });
+
+  // Animated wrapper height. Mirrors web's `height: revealY` clip — only
+  // applied once we have a positive contentH, so the very first layout
+  // pass can measure the natural size unconstrained.
+  const wrapperHeightStyle = useAnimatedStyle(() => ({
+    height: contentHShared.value > 0 ? revealY.value : undefined,
+  }));
+
+  if (!processed) {
     return null;
   }
 
   return (
-    <View>
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <Markdown style={mdStyles} rules={rules as any}>
-        {processed}
-      </Markdown>
-    </View>
+    <Animated.View style={[styles.wrapper, wrapperHeightStyle]}>
+      <View
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          // Monotonic — only grow. Once the height clip kicks in, RN may
+          // report a shrunk frame; we ignore those so contentH stays
+          // pinned to the largest natural size we've seen.
+          if (h > contentH) setContentH(h);
+        }}
+      >
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+        <Markdown style={mdStyles} rules={rules as any}>
+          {processed}
+        </Markdown>
+      </View>
+      {/* Soft fade at the bottom edge of the visible region so the
+          curtain doesn't look like a hard cut. Pinned to the bottom of
+          the (clipped) wrapper. */}
+      <LinearGradient
+        colors={[hexToRgba(theme.bg, 0), hexToRgba(theme.bg, 1)]}
+        style={styles.bottomFade}
+        pointerEvents="none"
+      />
+    </Animated.View>
   );
 }
+
+// Horizontal table scroll wrapper that *preserves the user's scrollX*
+// across re-renders. The Markdown component re-renders on every streamed
+// token, which calls `onContentSizeChange` on its inner ScrollView and
+// (on RN) resets the visible scroll offset to 0. We track the last
+// known scrollX and re-apply it whenever content size changes, which
+// keeps the table where the user left it while new tokens arrive below.
+function TableScrollView({
+  children,
+  tableStyle,
+}: {
+  children: React.ReactNode;
+  tableStyle: object;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const scrollXRef = useRef(0);
+  return (
+    <ScrollView
+      ref={ref}
+      horizontal
+      showsHorizontalScrollIndicator
+      style={styles.tableScroll}
+      onScroll={(e) => {
+        scrollXRef.current = e.nativeEvent.contentOffset.x;
+      }}
+      scrollEventThrottle={32}
+      onContentSizeChange={() => {
+        if (scrollXRef.current > 0) {
+          ref.current?.scrollTo({ x: scrollXRef.current, animated: false });
+        }
+      }}
+    >
+      <View style={[tableStyle, styles.tableInner]}>{children}</View>
+    </ScrollView>
+  );
+}
+
+// `expo-linear-gradient` accepts CSS-style color strings; we feed it
+// rgba()-with-alpha so the gradient blends cleanly into the chat bg.
+function hexToRgba(hex: string, alpha: number): string {
+  const v = hex.replace('#', '');
+  const r = parseInt(v.slice(0, 2), 16);
+  const g = parseInt(v.slice(2, 4), 16);
+  const b = parseInt(v.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const styles = StyleSheet.create({
+  wrapper: {
+    position: 'relative',
+    overflow: 'hidden',
+    alignSelf: 'stretch',
+  },
+  bottomFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: GRADIENT_FADE_PX,
+  },
+  tableScroll: {
+    marginVertical: 8,
+  },
+  tableInner: {
+    minWidth: 480,
+    marginVertical: 0,
+  },
+});
+
 
 function makeMarkdownStyles(theme: Theme) {
   // The library merges these into its defaults; we override the visible

@@ -40,7 +40,7 @@ export default function ProfilePage() {
         const p = resolvedId === uid ? await fetchMyProfile(t) : await fetchProfile(resolvedId, t)
         setProfile(p)
       } catch {
-        router.push('/community')
+        router.push('/discover')
       } finally {
         setLoading(false)
       }
@@ -85,11 +85,11 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-brand-bg">
       <Navbar />
       <div className="max-w-2xl mx-auto px-4 pt-20 pb-24">
-        <Link href="/community" className="inline-flex items-center gap-1.5 text-sm text-brand-muted hover:text-brand-text transition-colors mb-6">
+        <Link href="/discover" className="inline-flex items-center gap-1.5 text-sm text-brand-muted hover:text-brand-text transition-colors mb-6">
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Community
+          Discover
         </Link>
 
         {/* Profile header */}

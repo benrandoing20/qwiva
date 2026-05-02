@@ -241,6 +241,18 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         );
       } finally {
         setIsStreaming(false);
+        // Defensive: ensure the assistant message isn't stuck in a streaming
+        // state if the SSE 'done' event never arrived (network drop, backend
+        // closed the stream early, etc.). Without this the message keeps
+        // `isStreaming: true` and downstream UI (refs block, status dots)
+        // never transitions to its done state.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId && m.isStreaming
+              ? { ...m, isStreaming: false }
+              : m,
+          ),
+        );
         if (newConversationId) {
           // First message in a fresh thread — refresh the sidebar list so the
           // new conversation appears immediately.
