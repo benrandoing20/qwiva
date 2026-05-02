@@ -1,30 +1,26 @@
 import { useFonts as useExpoFonts } from 'expo-font';
 import {
-  Lora_400Regular_Italic,
-  Lora_600SemiBold,
-  Lora_700Bold,
-} from '@expo-google-fonts/lora';
-import {
-  JetBrainsMono_400Regular,
-  JetBrainsMono_500Medium,
-} from '@expo-google-fonts/jetbrains-mono';
+  PlusJakartaSans_300Light,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_500Medium_Italic,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
 
+// Single typeface (Plus Jakarta Sans) to match the web app's brand font.
+// Token aliases (display, gilroyLight, etc.) are preserved in
+// constants/typography.ts so existing screens keep working.
 export function useQwivaFonts() {
   const [loaded, error] = useExpoFonts({
-    Lora_700Bold,
-    Lora_600SemiBold,
-    Lora_400Regular_Italic,
-    JetBrainsMono_400Regular,
-    JetBrainsMono_500Medium,
-    'Gilroy-Light': require('../../assets/Gilroy-Light.ttf'),
-    'Gilroy-SemiBold': require('../../assets/Gilroy-SemiBold.ttf'),
-    'Gotham-Thin': require('../../assets/Gotham-Thin.otf'),
-    'Gotham-Light': require('../../assets/Gotham-Light.otf'),
-    'Gotham-Book': require('../../assets/Gotham-Book.otf'),
-    'Gotham-Medium': require('../../assets/Gotham-Medium.otf'),
-    'Gotham-Bold': require('../../assets/Gotham-Bold.otf'),
-    'Gotham-Black': require('../../assets/Gotham-Black.otf'),
-    'Gotham-Ultra': require('../../assets/Gotham-Ultra.otf'),
+    PlusJakartaSans_300Light,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_500Medium_Italic,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
   });
 
   return { loaded, error };

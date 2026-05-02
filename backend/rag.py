@@ -149,9 +149,10 @@ describe it exactly as listed in the "Referenced sources" section of that respon
 Do not speculate about whether a citation was correctly attributed — sources were \
 retrieved from verified guideline documents by the system. Trust them as given.
 
-For clinical questions needing specific guideline information (dosing, protocols, \
-treatment algorithms), give a brief answer if you can, and suggest they ask it \
-as a dedicated clinical question to get a fully cited guideline-grounded response.
+Answer follow-ups conversationally using the prior answer's content. \
+If a follow-up needs specific clinical detail not in the conversation, give your \
+best brief answer using the referenced sources — never ask the physician to \
+rephrase, restart, or pose the question as a standalone clinical question.
 """
 
 
@@ -271,6 +272,11 @@ class QwivaRAG:
         self._settings = settings or get_settings()
         _configure_langfuse(self._settings)
         self._cache = _SemanticCache()
+        # Drug-name index (medicine_name + inn → canonical name) — loaded once on
+        # first augmentation call, used to detect drugs mentioned in retrieved chunks.
+        self._drug_index: dict[str, str] | None = None
+        self._drug_pattern: re.Pattern | None = None
+        self._drug_index_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -358,6 +364,13 @@ class QwivaRAG:
         chunks = await self._rerank(effective_query, top_chunks)
         log.info("%s │ RERANK done: %d final chunks", _T(), len(chunks))
 
+        # Drug augmentation — when a retrieved guideline mentions a drug we
+        # have a label for, fetch that drug's dose + scenario-relevant
+        # sections deterministically. Bypasses the cosine-similarity mismatch
+        # that drops dose chunks from the main retrieval path.
+        chunks = await self._augment_with_drug_labels(embedding, chunks)
+        log.info("%s │ DRUG_AUGMENT done: %d chunks", _T(), len(chunks))
+
         citations = _build_citations(chunks)
         evidence_grade = _derive_evidence_grade(chunks)
         citations_payload = CitationsPayload(citations=citations, evidence_grade=evidence_grade)
@@ -404,6 +417,7 @@ class QwivaRAG:
             gather_coros: list = [
                 self._qdrant_search(embedding),
                 self._fts_search(query),
+                self._phrase_match_lookup(query),
             ]
             if self._settings.enable_drug_retrieval:
                 gather_coros.append(self._qdrant_search(embedding, doc_type="drug"))
@@ -415,12 +429,13 @@ class QwivaRAG:
 
             vector_chunks: list[Chunk] = gather_results[0]
             fts_chunks: list[Chunk] = gather_results[1]
-            drug_qdrant_chunks: list[Chunk] = gather_results[2] if self._settings.enable_drug_retrieval else []
-            drug_direct_chunks: list[Chunk] = gather_results[3] if self._settings.enable_drug_retrieval else []
+            phrase_chunks: list[Chunk] = gather_results[2]
+            drug_qdrant_chunks: list[Chunk] = gather_results[3] if self._settings.enable_drug_retrieval else []
+            drug_direct_chunks: list[Chunk] = gather_results[4] if self._settings.enable_drug_retrieval else []
 
             log.info(
-                "RETRIEVAL [%.0fms]: qdrant=%d  fts=%d  drug_qdrant=%d  drug_direct=%d",
-                retrieval_ms, len(vector_chunks), len(fts_chunks),
+                "RETRIEVAL [%.0fms]: qdrant=%d  fts=%d  phrase=%d  drug_qdrant=%d  drug_direct=%d",
+                retrieval_ms, len(vector_chunks), len(fts_chunks), len(phrase_chunks),
                 len(drug_qdrant_chunks), len(drug_direct_chunks),
             )
             merged = _rrf_merge(
@@ -431,9 +446,26 @@ class QwivaRAG:
                 snippet = c.content[:150].replace("\n", " ")
                 log.info("  [%d] %s | %s | chunk=%d\n        ↳ %s", i, c.doc_type, c.guideline_title[:65], c.chunk_index, snippet)
 
+            seen_ids = {c.id for c in merged}
+
+            # Inject phrase-match chunks first — they're exact-phrase hits on
+            # trial acronyms / eponyms / proper-noun phrases that embeddings
+            # don't carry semantically and that strict FTS AND-mode drops on
+            # spelling variants (e.g. "ischemia" vs "ischaemia").
+            phrase_inject_k = max(3, self._settings.retrieval_top_k // 4)
+            phrase_injected = 0
+            for c in phrase_chunks:
+                if phrase_injected >= phrase_inject_k:
+                    break
+                if c.id not in seen_ids:
+                    merged.append(c)
+                    seen_ids.add(c.id)
+                    phrase_injected += 1
+            if phrase_injected:
+                log.info("Injected %d phrase-match chunks into rerank pool", phrase_injected)
+
             # Inject drug chunks (direct lookup first, then Qdrant drug fallback)
             # directly into the pool — bypassing RRF rank penalty.
-            seen_ids = {c.id for c in merged}
             drug_inject_k = max(2, self._settings.retrieval_top_k // 3)
             injected = 0
 
@@ -578,6 +610,265 @@ class QwivaRAG:
         for i, c in enumerate(chunks[:4], 1):
             log.info("  [%d] %s | section=%s", i, c.guideline_title[:65], c.section_key)
         return chunks
+
+    # ------------------------------------------------------------------
+    # Phrase-match injection — exact-phrase ilike lookup for proper nouns
+    #
+    # Motivation: trial acronyms ("BALI", "MASTER DAPT", "COMPASS"), eponyms,
+    # and named-entity phrases carry no useful signal in embeddings and break
+    # under FTS websearch_to_tsquery's strict AND mode the moment one token
+    # mismatches (typically British vs American spelling: "ischaemia" vs
+    # "ischemia"). When a chunk containing the literal phrase exists, it
+    # should always reach the reranker — bypassing RRF gives that guarantee.
+    # ------------------------------------------------------------------
+
+    async def _phrase_match_lookup(self, query: str) -> list[Chunk]:
+        """Extract proper-noun phrases from the query and ilike-search both
+        guideline tables for exact-phrase matches. Cheap (3 short ilike
+        scans) and deterministic — no ranking dependence."""
+        phrases = _extract_proper_noun_phrases(query)
+        if not phrases:
+            return []
+
+        log.info("PHRASE MATCH: candidates %s", phrases)
+
+        db = await get_db()
+        s = self._settings
+        select_cols = (
+            "id, content, guideline_title, chapter_title, pub_year, "
+            "issuing_body, issuing_body_canonical, chunk_index, source_url, iris_url, "
+            "evidence_tier, grade_strength, grade_direction, chunk_type, is_current_version"
+        )
+
+        # Up to 4 phrases × 2 tables = 8 parallel ilike scans, each capped at 4 rows.
+        # Order by content length asc so chunks focused on the phrase rank above
+        # chunks that mention it incidentally in a long passage.
+        async def _scan(table: str, phrase: str):
+            return await (
+                db.table(table)
+                .select(select_cols)
+                .ilike("content", f"%{phrase}%")
+                .limit(4)
+                .execute()
+            )
+
+        coros = []
+        phrase_for_coro: list[str] = []
+        for phrase in phrases[:4]:
+            for table in (s.cpg_chunk_table, s.guideline_chunk_table):
+                coros.append(_scan(table, phrase))
+                phrase_for_coro.append(phrase)
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
+        chunks: list[Chunk] = []
+        seen_ids: set[str] = set()
+        for phrase, res in zip(phrase_for_coro, results, strict=False):
+            if isinstance(res, Exception):
+                log.warning("Phrase-match scan failed for %r: %s", phrase, res)
+                continue
+            for row in (res.data or []):
+                row_id = str(row.get("id"))
+                if row_id in seen_ids:
+                    continue
+                seen_ids.add(row_id)
+                chunks.append(_guideline_row_to_chunk(row))
+
+        log.info("PHRASE MATCH: %d chunks across %d phrases", len(chunks), len(phrases))
+        for i, c in enumerate(chunks[:5], 1):
+            snippet = c.content[:160].replace("\n", " ")
+            log.info("  [%d] %s | chunk=%d\n        ↳ %s", i, c.guideline_title[:65], c.chunk_index, snippet)
+        return chunks
+
+    # ------------------------------------------------------------------
+    # Drug augmentation — second-pass lookup after rerank
+    #
+    # Motivation: drug-label dose sections embed poorly against natural
+    # clinical-scenario queries ("amoxicillin in pediatric pneumonia") — the
+    # dose chunk has none of the scenario language, so cosine similarity
+    # ranks it below indication chunks. Once retrieval has surfaced a
+    # guideline that mentions a drug, we can fetch that drug's authoritative
+    # dose info deterministically (SQL by name + section) AND in parallel
+    # do a name-filtered vector search (semantic, but constrained to one
+    # drug's chunks so the embedding mismatch goes away).
+    # ------------------------------------------------------------------
+
+    async def _load_drug_index(self) -> None:
+        """Populate self._drug_index + self._drug_pattern from drug_label_chunks.
+        Idempotent — only loads once per process. Lock-protected against races."""
+        if self._drug_index is not None:
+            return
+        async with self._drug_index_lock:
+            if self._drug_index is not None:
+                return
+            db = await get_db()
+            try:
+                # `select` without limit returns up to PostgREST default; rows are small
+                res = await (
+                    db.table(self._settings.drug_chunk_table)
+                    .select("medicine_name, inn")
+                    .execute()
+                )
+            except Exception as exc:
+                log.warning("Drug index load failed: %s — augmentation disabled", exc)
+                self._drug_index = {}
+                self._drug_pattern = None
+                return
+
+            index: dict[str, str] = {}
+            for row in res.data or []:
+                med = (row.get("medicine_name") or "").strip()
+                inn = (row.get("inn") or "").strip()
+                canonical = med or inn
+                if not canonical:
+                    continue
+                if med:
+                    index[med.lower()] = canonical
+                if inn and inn.lower() != med.lower():
+                    index[inn.lower()] = canonical
+
+            self._drug_index = index
+            if index:
+                # Sort longest-first so "amoxicillin clavulanate" wins over "amoxicillin"
+                names = sorted(set(index.keys()), key=len, reverse=True)
+                self._drug_pattern = re.compile(
+                    r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b",
+                    re.IGNORECASE,
+                )
+                log.info("DRUG INDEX loaded: %d unique names", len(names))
+            else:
+                self._drug_pattern = None
+                log.info("DRUG INDEX empty — augmentation will be a no-op")
+
+    async def _detect_drugs_in_chunks(self, chunks: list[Chunk]) -> list[str]:
+        """Return canonical drug names referenced in the retrieved chunks,
+        sorted by aggregate mention strength (descending)."""
+        await self._load_drug_index()
+        if not self._drug_index:
+            return []
+
+        counts: dict[str, int] = {}
+
+        # Direct payload signal — a chunk already tagged as a drug label is
+        # high-confidence; weight 2x to ensure it ranks above incidental mentions.
+        for c in chunks:
+            if c.medicine_name:
+                canonical = self._drug_index.get(c.medicine_name.lower(), c.medicine_name)
+                counts[canonical] = counts.get(canonical, 0) + 2
+
+        # Content scan — match drug names in chunk content (word-boundary regex)
+        if self._drug_pattern is not None:
+            for c in chunks:
+                seen_in_chunk: set[str] = set()
+                for m in self._drug_pattern.findall(c.content):
+                    canonical = self._drug_index.get(m.lower())
+                    if not canonical or canonical in seen_in_chunk:
+                        continue
+                    seen_in_chunk.add(canonical)
+                    counts[canonical] = counts.get(canonical, 0) + 1
+
+        return sorted(counts, key=lambda x: counts[x], reverse=True)
+
+    async def _fetch_drug_dose_sections(self, medicine_name: str) -> list[Chunk]:
+        """Deterministic SQL fetch of dose + special-population sections — the
+        dose info we never want to lose to embedding similarity."""
+        db = await get_db()
+        select_cols = (
+            "id, content, medicine_name, inn, atc_code, section_key, section_title, "
+            "clinical_priority, chunk_index, fda_url, emc_url, source, last_updated"
+        )
+        try:
+            res = await (
+                db.table(self._settings.drug_chunk_table)
+                .select(select_cols)
+                .eq("medicine_name", medicine_name)
+                .in_("section_key", ["dosage_and_administration", "use_in_specific_populations"])
+                .limit(8)
+                .execute()
+            )
+            return [_drug_row_to_chunk(r) for r in (res.data or [])]
+        except Exception as exc:
+            log.warning("Drug dose SQL fetch failed for %s: %s", medicine_name, exc)
+            return []
+
+    async def _qdrant_drug_filtered(
+        self, medicine_name: str, embedding: list[float]
+    ) -> list[Chunk]:
+        """Vector search constrained to one drug's chunks. Inside the bounds of
+        a single drug, cosine similarity now ranks by clinical-context match
+        (warnings, contraindications, interactions for the scenario) rather
+        than by drug-name presence."""
+        if not self._settings.qdrant_url:
+            return []
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        try:
+            response = await self._qdrant.query_points(
+                collection_name=self._settings.qdrant_collection,
+                query=embedding,
+                query_filter=Filter(must=[
+                    FieldCondition(key="doc_type", match=MatchValue(value="drug")),
+                    FieldCondition(key="medicine_name", match=MatchValue(value=medicine_name)),
+                ]),
+                limit=5,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return [_qdrant_hit_to_chunk(p) for p in response.points]
+        except Exception as exc:
+            log.warning("Drug Qdrant filtered search failed for %s: %s", medicine_name, exc)
+            return []
+
+    # Cap detected drugs per query — guards against a guideline that mentions
+    # a dozen antibiotics blowing up the context window.
+    _AUGMENT_MAX_DRUGS = 5
+
+    async def _augment_with_drug_labels(
+        self,
+        embedding: list[float],
+        chunks: list[Chunk],
+    ) -> list[Chunk]:
+        """If retrieved chunks mention drugs we have labels for, fetch each
+        drug's dose section (SQL) and scenario-relevant sections (Qdrant
+        filtered) in parallel, dedupe against existing chunks, and append.
+        New chunks are inlined as standard sources — _build_citations dedupes
+        them by guideline_title so the user sees one citation per drug label."""
+        if not self._settings.enable_drug_retrieval:
+            return chunks
+
+        detected = await self._detect_drugs_in_chunks(chunks)
+        if not detected:
+            return chunks
+
+        detected = detected[: self._AUGMENT_MAX_DRUGS]
+        log.info("DRUG AUGMENT: detected %d drug(s) in retrieved chunks: %s",
+                 len(detected), detected)
+
+        # For each drug: fire SQL + Qdrant in parallel — all branches concurrently
+        coros: list = []
+        for drug in detected:
+            coros.append(self._fetch_drug_dose_sections(drug))
+            coros.append(self._qdrant_drug_filtered(drug, embedding))
+
+        t0 = time.perf_counter()
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        elapsed = (time.perf_counter() - t0) * 1000
+
+        existing_ids = {c.id for c in chunks}
+        new_chunks: list[Chunk] = []
+        seen_aug: set[str] = set()
+        for r in results:
+            if isinstance(r, Exception):
+                log.warning("DRUG AUGMENT branch failed: %s", r)
+                continue
+            for c in r:
+                if c.id in existing_ids or c.id in seen_aug:
+                    continue
+                seen_aug.add(c.id)
+                new_chunks.append(c)
+
+        log.info("DRUG AUGMENT [%.0fms]: appended %d label chunks (%d branches)",
+                 elapsed, len(new_chunks), len(coros))
+        return chunks + new_chunks
 
     async def _qdrant_search(
         self, embedding: list[float], doc_type: str | None = None
@@ -1323,6 +1614,66 @@ def _expand_clinical_abbreviations(query: str) -> str:
     for pattern, expansion in _CLINICAL_ABBREVS.items():
         result = re.sub(pattern, expansion, result, flags=re.IGNORECASE)
     return result
+
+
+# Words that look proper-noun-shaped but carry no retrieval signal.
+# Filtering them out prevents pointless ilike scans on every query.
+_PHRASE_STOPWORDS: frozenset[str] = frozenset({
+    "what", "when", "where", "which", "how", "why", "who", "did",
+    "does", "the", "and", "for", "from", "with", "show", "shows",
+    "trial", "study", "patient", "patients",
+})
+
+
+def _extract_proper_noun_phrases(query: str) -> list[str]:
+    """Pull out trial acronyms, eponyms, and capitalized phrases worth an
+    exact-phrase lookup. Order roughly reflects retrieval priority:
+    parenthetical acronyms first (most specific), then multi-word capitalized
+    phrases, then standalone all-caps tokens. Lowercase queries get a
+    pre-"trial"/"study" n-gram fallback so 'master dapt trial' still works.
+    """
+    phrases: list[str] = []
+    seen: set[str] = set()
+
+    def _push(p: str) -> None:
+        p = p.strip()
+        if not p or len(p) < 3:
+            return
+        key = p.lower()
+        if key in seen or key in _PHRASE_STOPWORDS:
+            return
+        seen.add(key)
+        phrases.append(p)
+
+    # 1. Parenthetical acronyms: "(BALI)" → "BALI"
+    for m in re.finditer(r"\(([A-Z][A-Z0-9-]{2,})\)", query):
+        _push(m.group(1))
+
+    # 2. Multi-word capitalized phrases (≥2 words, each starting uppercase or all-caps)
+    for m in re.finditer(
+        r"\b(?:[A-Z][a-zA-Z]{2,}|[A-Z]{2,})(?:\s+(?:[A-Z][a-zA-Z]+|[A-Z]{2,}|in|of|and|the))*\s+(?:[A-Z][a-zA-Z]+|[A-Z]{2,})\b",
+        query,
+    ):
+        phrase = m.group(0).strip()
+        # Drop trailing connector words like "in", "of"
+        while phrase.split() and phrase.split()[-1].lower() in {"in", "of", "and", "the"}:
+            phrase = phrase.rsplit(" ", 1)[0]
+        _push(phrase)
+
+    # 3. Standalone ALL-CAPS tokens ≥3 chars (catches plain "BALI", "MASTER DAPT" individually)
+    for m in re.finditer(r"\b[A-Z]{3,}(?:\s+[A-Z]{3,})*\b", query):
+        _push(m.group(0))
+
+    # 4. Lowercase fallback: take the 1-3 tokens preceding "trial" or "study".
+    # Catches "master dapt trial" / "compass study" when typed lowercase.
+    if not phrases:
+        for m in re.finditer(r"\b((?:\w+\s+){1,3})(?:trial|study)\b", query, flags=re.IGNORECASE):
+            preceding = m.group(1).strip()
+            tokens = [t for t in preceding.split() if t.lower() not in _PHRASE_STOPWORDS]
+            if len(tokens) >= 1:
+                _push(" ".join(tokens[-3:]))
+
+    return phrases
 
 
 def _strip_question_words(text: str) -> str:

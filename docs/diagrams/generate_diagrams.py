@@ -206,10 +206,36 @@ def high_level():
         els += [R(eid, SX + 24, sp_y + yoff, SW - 48, h, "#f0fdf4", "#86efac", 1)]
         els += [T(eid + "_t", SX + 28, sp_y + yoff + 2, SW - 56, h - 4, txt, "#14532d", 10)]
 
+    # ── LANE 4: MOBILE APP (x=1640, w=400) ───────────────────────────────
+    MX, MW = 1640, 400
+    els += lane_bg("mob", MX, FY, MW, FH, "MOBILE APP  (Expo / React Native)",
+                   "#fff7ed", "#f97316", "#7c2d12")
+
+    mob_boxes = [
+        ("mob_sdk",  "Expo Go SDK 54 · RN 0.81.5\nexpo-router · Reanimated 4.1.1",
+         "#ffedd5", "#f97316", "#7c2d12"),
+        ("mob_on",   "Onboarding Flow  (6 screens)\nregister → phone → verify\n→ specialty  /  rotation (Intern)",
+         "#ffedd5", "#f97316", "#7c2d12"),
+        ("mob_ask",  "Ask Tab\nPOST /search/stream  (backend)\nSSE streaming · citations · grade",
+         "#ffedd5", "#f97316", "#7c2d12"),
+        ("mob_soc",  "Social Tabs\nFeed · Posts · Comments · Follows",
+         "#ffedd5", "#f97316", "#7c2d12"),
+        ("mob_me",   "Profile  (Me tab)\ncadre · registration_number\nspecialties / current_rotation",
+         "#ffedd5", "#f97316", "#7c2d12"),
+        ("mob_lib",  "src/lib/supabase.ts\n@supabase/supabase-js · AsyncStorage\nanon key · JWT session persistence",
+         "#fed7aa", "#ea580c", "#7c2d12"),
+    ]
+    my = FY + 48
+    for eid, txt, bg, stroke, tcol in mob_boxes:
+        lines = txt.count("\n") + 1
+        h = 32 + (lines - 1) * 16
+        els += box(eid, MX + 14, my, MW - 28, h, txt, bg, stroke, tcol, 11)
+        my += h + 8
+
     # ── EXTERNAL SERVICES STRIP (y=860) ───────────────────────────────────
     EY = 860
-    els += [R("ext_bg", 20, EY, 1600, 96, "#fef2f2", "#ef4444", 2, False)]
-    els += [R("ext_hh", 20, EY, 1600, 28, "#7f1d1d", "#7f1d1d", 0, False)]
+    els += [R("ext_bg", 20, EY, 2040, 96, "#fef2f2", "#ef4444", 2, False)]
+    els += [R("ext_hh", 20, EY, 2040, 28, "#7f1d1d", "#7f1d1d", 0, False)]
     els += [T("ext_hh_t", 30, EY + 2, 400, 26, "EXTERNAL SERVICES", "#ffffff", 13, "left")]
 
     ext_svcs = [
@@ -255,6 +281,51 @@ def high_level():
         ("a_be_gr",  140, 835),
     ]:
         els += A(eid, [(BX + bx_off, FY + FH), (20 + ex_cx, EY + 32)], "#ef4444", True)
+
+    # Mobile → Backend (Ask tab → /search/stream)
+    els += A("a_mob_be", [(MX, FY + 420), (BX + BW, FY + 420)], "#f97316", True,
+             label="HTTPS /search/stream")
+
+    # Mobile → Supabase direct (anon key)
+    els += A("a_mob_su", [(MX + MW // 2, FY + FH),
+                           (MX + MW // 2, EY - 6),
+                           (SX + SW - 30, EY - 6),
+                           (SX + SW - 30, FY + FH)],
+             "#f97316", True, label="anon key\n(auth + profiles)")
+
+    # ── INGESTION PIPELINES (y=972) ──────────────────────────────────────
+    IY = EY + 112
+    IH = 300
+    els += [R("ing_bg",  20, IY, 2040, IH, "#f8fafc", "#475569", 2, False)]
+    els += [R("ing_hdr", 20, IY, 2040, 32, "#0f172a", "#0f172a", 0, False)]
+    els += [T("ing_hdr_t", 30, IY + 2, 900, 28,
+               "INGESTION PIPELINES  (Railway cron jobs  ·  ingestion/)", "#ffffff", 13, "left")]
+    PI_Y = IY + 36
+    PI_H = IH - 44
+
+    els += box("ing_cpg", 24, PI_Y, 1000, PI_H,
+        "CPG Pipeline  (ingestion/cpg/  ·  monthly Railway cron)\n"
+        "  run_pipeline.py — orchestrator\n"
+        "  _01_discover.py  → crawl publishers (WHO, MOH Kenya, SIGN, NICE, …) for new guideline PDFs\n"
+        "  _02_fetch_store.py  → download PDFs → Supabase Storage\n"
+        "  _03_parse_chunk.py  → PDF text extraction → sentence-aware chunks → UUID5 IDs\n"
+        "  _04_embed_insert.py  → text-embedding-3-small → upsert Qdrant + clinical_practice_guideline_chunks\n"
+        "  Versioning: is_current_version=True on new  ·  False + superseded_by set on old",
+        "#f1f5f9", "#64748b", "#0f172a", 10)
+
+    els += box("ing_pmc", 1040, PI_Y, 980, PI_H,
+        "PMC Pipeline  (ingestion/pmc/  ·  weekly Railway cron)\n"
+        "  pmc_oa_ingest.py — single-file orchestrator\n"
+        "  Source: PubMed Central Open Access weekly XML article dump\n"
+        "  Parse articles → chunk abstracts + full text\n"
+        "  text-embedding-3-small → upsert Supabase guideline_chunks\n"
+        "  doc_type = 'pubmed'  ·  evidence_tier = 2",
+        "#f1f5f9", "#64748b", "#0f172a", 10)
+
+    # Ingestion → Storage arrows (upward into storage lane)
+    els += A("a_cpg_qd", [(400, IY), (SX + 100, FY + FH)], "#22c55e", True, "vector upsert")
+    els += A("a_cpg_su", [(700, IY), (SX + 280, FY + FH)], "#22c55e", True, "CPG chunks")
+    els += A("a_pmc_su", [(1400, IY), (SX + 380, FY + FH)], "#22c55e", True, "PubMed chunks")
 
     return flatten(els)
 
@@ -722,6 +793,14 @@ def detailed():
         "user_profiles\n"
         "  user_id UUID PK FK auth.users CASCADE\n"
         "  display_name TEXT NOT NULL\n"
+        "  first_name TEXT, last_name TEXT        ← mig 007\n"
+        "  phone TEXT                             ← mig 007\n"
+        "  cadre TEXT                             ← mig 007\n"
+        "    [Medical Practitioner|Clinical Officer\n"
+        "     Dental Practitioner|Intern]\n"
+        "  registration_number TEXT               ← mig 007\n"
+        "  specialties TEXT[] DEFAULT '{}'        ← mig 007\n"
+        "  current_rotation TEXT[] DEFAULT '{}'   ← mig 007\n"
         "  specialty TEXT, subspecialty TEXT\n"
         "  institution TEXT\n"
         "  country TEXT DEFAULT 'Kenya'\n"

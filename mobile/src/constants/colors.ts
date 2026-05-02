@@ -1,21 +1,26 @@
+// Static palette — kept aligned with the web app's LIGHT theme. The runtime
+// app surfaces (Ask, Sidebar, Me) use useTheme() instead of these constants
+// so they switch with the system color scheme. Onboarding screens still read
+// Colors.* directly and therefore render in light mode regardless of system
+// preference; that's intentional for v1.
 export const Colors = {
-  // Core Brand
-  navy: '#002E5D',
-  purple: '#6F5091',
-  lilac: '#B288B9',
-  pink: '#D988BA',
+  // Core Brand — synced with web's --brand-navy / --brand-accent / --brand-pink
+  navy: '#1A234E',
+  purple: '#A855F7',
+  lilac: '#C084FC',
+  pink: '#F472B6',
 
-  // Surfaces
-  bgBase: '#FAFAFA',
-  bgSurface: '#F4F4F6',
-  bgElevated: '#FFFFFF',
+  // Surfaces — match web's light theme tokens
+  bgBase: '#F6F8FC',       // web --brand-bg light
+  bgSurface: '#E8EBF5',    // web --brand-raised light
+  bgElevated: '#FFFFFF',   // web --brand-surface light
   bgNavyWash: '#EEF3F9',
-  bgSidebar: '#FAF7F2',
+  bgSidebar: '#E8EBF5',
 
-  // Text
-  textPrimary: '#1A1A2E',
-  textSecondary: '#5C5C7A',
-  textMuted: '#9999B3',
+  // Text — match web's light theme
+  textPrimary: '#1A234E',
+  textSecondary: '#5C6488',
+  textMuted: '#8B92B0',
   textInverse: '#FFFFFF',
 
   // Semantic
@@ -28,12 +33,12 @@ export const Colors = {
   info: '#4764AF',
   infoWash: '#EEF2FA',
 
-  // Interactive States
-  purpleHover: '#5D4179',
-  purpleDisabled: '#B8A8CC',
-  navyPressed: '#001E3C',
-  borderDefault: '#E2E2EC',
-  borderFocus: '#6F5091',
+  // Interactive States — synced with web hover/disabled tones
+  purpleHover: '#9333EA',
+  purpleDisabled: '#D6BCFA',
+  navyPressed: '#0F1638',
+  borderDefault: '#C8CEE2',
+  borderFocus: '#A855F7',
 
   // Gamification
   xpGold: '#F5A623',

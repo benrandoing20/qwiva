@@ -62,6 +62,11 @@ from backend.models import (
     ProfileUpdateRequest,
     SearchRequest,
     SiblingOut,
+    SurveyCreate,
+    SurveyOut,
+    SurveyResponseCreate,
+    SurveyResultsOut,
+    SurveyStatusUpdate,
     UserProfile,
 )
 from backend.profiles import (
@@ -72,6 +77,15 @@ from backend.profiles import (
     upsert_profile,
 )
 from backend.rag import rag
+from backend.surveys import (
+    create_survey as _create_survey,
+    get_results as _get_results,
+    get_survey_detail as _get_survey_detail,
+    list_my_surveys as _list_my_surveys,
+    list_surveys as _list_surveys,
+    require_admin,
+    submit_response as _submit_response,
+)
 from backend.social import (
     create_comment,
     create_post,
@@ -124,7 +138,10 @@ app = FastAPI(title="Qwiva API", version="0.1.0")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.onrender.com", "localhost", "127.0.0.1"])
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*.onrender.com", "*.fly.dev", "localhost", "127.0.0.1", "*"],
+)
 
 
 @app.on_event("startup")
@@ -145,7 +162,7 @@ app.add_middleware(
     allow_origins=[_settings.frontend_url, "http://localhost:3000"],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -277,7 +294,9 @@ async def finish_onboarding(
     body: OnboardingRequest,
     user: UserProfile = Depends(verify_token),
 ):
-    profile = await complete_onboarding(user.user_id, body.model_dump())
+    profile = await complete_onboarding(
+        user.user_id, body.model_dump(exclude_none=True), user.email
+    )
     return PhysicianProfileOut(**profile)
 
 
@@ -505,6 +524,120 @@ async def discover_users(
         offset=offset,
     )
     return [DiscoverUserOut(**r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Surveys
+# ---------------------------------------------------------------------------
+
+_VALID_SURVEY_TRANSITIONS = {("draft", "active"), ("active", "closed")}
+
+
+@app.get("/surveys", response_model=list[SurveyOut])
+async def list_surveys_route(
+    user: UserProfile = Depends(verify_token),
+):
+    profile = await get_profile(user.user_id)
+    is_admin = profile and profile.get("role") == "admin"
+    if is_admin:
+        active, mine = await asyncio.gather(
+            _list_surveys(user.user_id, status="active"),
+            _list_my_surveys(user.user_id),
+        )
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for s in mine + active:
+            if s["id"] not in seen:
+                seen.add(s["id"])
+                merged.append(s)
+        return [SurveyOut(**s) for s in merged]
+    rows = await _list_surveys(user.user_id, status="active")
+    return [SurveyOut(**r) for r in rows]
+
+
+@app.get("/surveys/{survey_id}", response_model=SurveyOut)
+async def get_survey_route(
+    survey_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    survey = await _get_survey_detail(survey_id, user.user_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    return SurveyOut(**survey)
+
+
+@app.post("/surveys", response_model=SurveyOut, status_code=201)
+async def create_survey_route(
+    body: SurveyCreate,
+    user: UserProfile = Depends(require_admin),
+):
+    survey = await _create_survey(user.user_id, body)
+    detail = await _get_survey_detail(survey["id"], user.user_id)
+    return SurveyOut(**detail)
+
+
+@app.patch("/surveys/{survey_id}/status")
+async def update_survey_status_route(
+    survey_id: str,
+    body: SurveyStatusUpdate,
+    user: UserProfile = Depends(verify_token),
+):
+    db = await get_db()
+    result = await (
+        db.table("surveys")
+        .select("created_by, status")
+        .eq("id", survey_id)
+        .maybe_single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    profile = await get_profile(user.user_id)
+    is_creator = result.data["created_by"] == user.user_id
+    is_admin = profile and profile.get("role") == "admin"
+    if not (is_creator or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    current = result.data["status"]
+    if (current, body.status) not in _VALID_SURVEY_TRANSITIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot transition survey from '{current}' to '{body.status}'",
+        )
+    await db.table("surveys").update({"status": body.status}).eq("id", survey_id).execute()
+    return {"ok": True}
+
+
+@app.post("/surveys/{survey_id}/responses", status_code=201)
+async def submit_survey_response_route(
+    survey_id: str,
+    body: SurveyResponseCreate,
+    user: UserProfile = Depends(verify_token),
+):
+    try:
+        response = await _submit_response(survey_id, user.user_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"response_id": response["id"]}
+
+
+@app.get("/surveys/{survey_id}/results", response_model=SurveyResultsOut)
+async def get_survey_results_route(
+    survey_id: str,
+    user: UserProfile = Depends(verify_token),
+):
+    db = await get_db()
+    result = await (
+        db.table("surveys").select("created_by").eq("id", survey_id).maybe_single().execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    profile = await get_profile(user.user_id)
+    is_creator = result.data["created_by"] == user.user_id
+    is_admin = profile and profile.get("role") == "admin"
+    if not (is_creator or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    results = await _get_results(survey_id)
+    return SurveyResultsOut(**results)
 
 
 # ---------------------------------------------------------------------------

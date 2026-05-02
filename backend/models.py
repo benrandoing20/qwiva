@@ -116,6 +116,13 @@ class UserProfile(BaseModel):
 class PhysicianProfileOut(BaseModel):
     user_id: str
     display_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    cadre: str | None = None
+    registration_number: str | None = None
+    specialties: list[str] = []
+    current_rotation: list[str] = []
     specialty: str | None = None
     subspecialty: str | None = None
     institution: str | None = None
@@ -128,6 +135,7 @@ class PhysicianProfileOut(BaseModel):
     languages: list[str]
     interests: list[str]
     onboarding_complete: bool
+    role: str = "physician"
     follower_count: int
     following_count: int
     post_count: int
@@ -136,7 +144,14 @@ class PhysicianProfileOut(BaseModel):
 
 
 class OnboardingRequest(BaseModel):
-    display_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    display_name: str | None = None
+    phone: str | None = None
+    cadre: str | None = None
+    registration_number: str | None = None
+    specialties: list[str] = []
+    current_rotation: list[str] = []
     specialty: str | None = None
     subspecialty: str | None = None
     institution: str | None = None
@@ -151,6 +166,13 @@ class OnboardingRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     display_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    cadre: str | None = None
+    registration_number: str | None = None
+    specialties: list[str] | None = None
+    current_rotation: list[str] | None = None
     specialty: str | None = None
     subspecialty: str | None = None
     institution: str | None = None
@@ -254,3 +276,112 @@ class DiscoverUserOut(BaseModel):
 class LikeResponse(BaseModel):
     liked: bool
     like_count: int
+
+
+# ---------------------------------------------------------------------------
+# Surveys
+# ---------------------------------------------------------------------------
+
+
+class SurveyQuestionOption(BaseModel):
+    id: str
+    text: str
+
+
+class SurveyQuestionCreate(BaseModel):
+    question_text: str
+    question_type: Literal["multiple_choice", "multi_select", "scale", "open_text"]
+    options: list[SurveyQuestionOption] | None = None
+    scale_min: int = 1
+    scale_max: int = 5
+    scale_min_label: str | None = None
+    scale_max_label: str | None = None
+    is_required: bool = True
+    order_index: int = 0
+
+
+class SurveyCreate(BaseModel):
+    title: str
+    description: str | None = None
+    specialty_tags: list[str] = []
+    is_anonymous: bool = False
+    estimated_minutes: int | None = None
+    starts_at: str | None = None
+    ends_at: str | None = None
+    questions: list[SurveyQuestionCreate]
+    status: Literal["draft", "active"] = "draft"
+
+
+class SurveyQuestionOut(BaseModel):
+    id: str
+    survey_id: str
+    question_text: str
+    question_type: str
+    options: list[SurveyQuestionOption] | None = None
+    scale_min: int | None = None
+    scale_max: int | None = None
+    scale_min_label: str | None = None
+    scale_max_label: str | None = None
+    is_required: bool
+    order_index: int
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def parse_options(cls, v: object) -> object:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return None
+        return v
+
+
+class SurveyOut(BaseModel):
+    id: str
+    created_by: str
+    title: str
+    description: str | None = None
+    specialty_tags: list[str]
+    status: str
+    is_anonymous: bool
+    estimated_minutes: int | None = None
+    response_count: int
+    starts_at: str | None = None
+    ends_at: str | None = None
+    created_at: str
+    updated_at: str
+    has_responded: bool = False
+    questions: list[SurveyQuestionOut] | None = None
+
+
+class SurveyAnswerInput(BaseModel):
+    question_id: str
+    answer_text: str | None = None
+    answer_options: list[str] | None = None
+
+
+class SurveyResponseCreate(BaseModel):
+    answers: list[SurveyAnswerInput]
+
+
+class SurveyStatusUpdate(BaseModel):
+    status: Literal["draft", "active", "closed"]
+
+
+class SurveyResultQuestion(BaseModel):
+    question_id: str
+    question_text: str
+    question_type: str
+    total_responses: int
+    option_counts: dict[str, int] | None = None
+    scale_distribution: dict[int, int] | None = None
+    open_text_responses: list[str] | None = None
+    average_scale: float | None = None
+
+
+class SurveyResultsOut(BaseModel):
+    survey_id: str
+    title: str
+    status: str
+    response_count: int
+    questions: list[SurveyResultQuestion]

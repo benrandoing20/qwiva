@@ -36,6 +36,13 @@ export type SSEEvent =
 export interface PhysicianProfile {
   user_id: string
   display_name: string
+  first_name?: string | null
+  last_name?: string | null
+  phone?: string | null
+  cadre?: string | null
+  registration_number?: string | null
+  specialties?: string[]
+  current_rotation?: string[]
   specialty?: string | null
   subspecialty?: string | null
   institution?: string | null
@@ -48,6 +55,7 @@ export interface PhysicianProfile {
   languages: string[]
   interests: string[]
   onboarding_complete: boolean
+  role?: string
   follower_count: number
   following_count: number
   post_count: number
@@ -162,4 +170,73 @@ export interface ChatMessage {
   isError?: boolean
   statusMessage?: string
   suggestions?: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Surveys
+// ---------------------------------------------------------------------------
+
+export type QuestionType = 'multiple_choice' | 'multi_select' | 'scale' | 'open_text'
+export type SurveyStatus = 'draft' | 'active' | 'closed'
+
+export interface SurveyQuestionOption {
+  id: string
+  text: string
+}
+
+export interface SurveyQuestion {
+  id: string
+  survey_id: string
+  question_text: string
+  question_type: QuestionType
+  options?: SurveyQuestionOption[] | null
+  scale_min?: number | null
+  scale_max?: number | null
+  scale_min_label?: string | null
+  scale_max_label?: string | null
+  is_required: boolean
+  order_index: number
+}
+
+export interface Survey {
+  id: string
+  created_by: string
+  title: string
+  description?: string | null
+  specialty_tags: string[]
+  status: SurveyStatus
+  is_anonymous: boolean
+  estimated_minutes?: number | null
+  response_count: number
+  starts_at?: string | null
+  ends_at?: string | null
+  created_at: string
+  updated_at: string
+  has_responded: boolean
+  questions?: SurveyQuestion[] | null
+}
+
+export interface SurveyAnswerInput {
+  question_id: string
+  answer_text?: string | null
+  answer_options?: string[] | null
+}
+
+export interface SurveyResultQuestion {
+  question_id: string
+  question_text: string
+  question_type: QuestionType
+  total_responses: number
+  option_counts?: Record<string, number> | null
+  scale_distribution?: Record<number, number> | null
+  open_text_responses?: string[] | null
+  average_scale?: number | null
+}
+
+export interface SurveyResults {
+  survey_id: string
+  title: string
+  status: SurveyStatus
+  response_count: number
+  questions: SurveyResultQuestion[]
 }

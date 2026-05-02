@@ -15,15 +15,43 @@ function LoginForm() {
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [resendStatus, setResendStatus] = useState<string | null>(null)
 
   useEffect(() => {
     if (searchParams.get('error') === 'confirmation_failed') {
       setError('Email confirmation failed. Please try signing up again or contact support.')
     }
   }, [searchParams])
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setInterval(() => setResendCooldown((s) => Math.max(0, s - 1)), 1000)
+    return () => clearInterval(t)
+  }, [resendCooldown])
+
+  async function handleResend() {
+    if (!pendingEmail || resendCooldown > 0) return
+    setResendStatus(null)
+    const redirectTo = `${window.location.origin}/auth/callback?next=/onboarding`
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email: pendingEmail,
+      options: { emailRedirectTo: redirectTo },
+    })
+    if (resendError) {
+      setResendStatus(resendError.message)
+    } else {
+      setResendStatus(`Confirmation email re-sent to ${pendingEmail}.`)
+      setResendCooldown(30)
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -34,13 +62,20 @@ function LoginForm() {
     if (mode === 'login') {
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
       setLoading(false)
-      if (authError) { setError(authError.message); return }
+      if (authError) {
+        const code = (authError as { code?: string }).code
+        if (code === 'email_not_confirmed' || /not confirmed/i.test(authError.message)) {
+          setPendingEmail(email)
+        }
+        setError(authError.message)
+        return
+      }
       // Check if onboarding is complete — redirect new users to onboarding
       if (data.session) {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select('onboarding_complete')
-          .eq('id', data.session.user.id)
+          .eq('user_id', data.session.user.id)
           .maybeSingle()
         if (!profile?.onboarding_complete) {
           router.push('/onboarding')
@@ -54,16 +89,31 @@ function LoginForm() {
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: redirectTo },
+        options: {
+          emailRedirectTo: redirectTo,
+          data: { first_name: firstName.trim(), last_name: lastName.trim() },
+        },
       })
       setLoading(false)
       if (authError) { setError(authError.message); return }
       // If email confirmation is disabled, signUp returns a session immediately
       if (data.session) {
+        const fn = firstName.trim()
+        const ln = lastName.trim()
+        if (fn || ln) {
+          await supabase.from('user_profiles').upsert({
+            user_id: data.session.user.id,
+            first_name: fn || null,
+            last_name: ln || null,
+            display_name: [fn, ln].filter(Boolean).join(' ') || null,
+          }, { onConflict: 'user_id' })
+        }
         router.push('/onboarding')
         return
       }
       setSuccess('Check your email to confirm your account — you\'ll be taken straight to profile setup.')
+      setPendingEmail(email)
+      setResendCooldown(30)
     }
   }
 
@@ -87,11 +137,11 @@ function LoginForm() {
             <button
               key={m}
               type="button"
-              onClick={() => { setMode(m); setError(null); setSuccess(null) }}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
+              onClick={() => { setMode(m); setError(null); setSuccess(null); setFirstName(''); setLastName('') }}
+              className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors ${
                 mode === m
-                  ? 'bg-brand-raised text-brand-text border border-brand-border/50'
-                  : 'text-brand-muted hover:text-brand-text/90'
+                  ? 'bg-brand-raised text-brand-text border-brand-border/50'
+                  : 'bg-transparent text-brand-muted hover:text-brand-text/90 border-transparent'
               }`}
             >
               {m === 'login' ? 'Sign in' : 'Create account'}
@@ -103,6 +153,36 @@ function LoginForm() {
           onSubmit={handleSubmit}
           className="bg-brand-surface border border-brand-border rounded-2xl px-6 py-7 space-y-4"
         >
+          {mode === 'signup' && (
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
+                  First name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="First"
+                  className="w-full px-3 py-2.5 bg-brand-bg border border-brand-border rounded-lg text-sm text-brand-text placeholder-brand-subtle outline-none focus:border-brand-accent/45 focus:ring-1 focus:ring-brand-accent/15 transition-all"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
+                  Last name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last"
+                  className="w-full px-3 py-2.5 bg-brand-bg border border-brand-border rounded-lg text-sm text-brand-text placeholder-brand-subtle outline-none focus:border-brand-accent/45 focus:ring-1 focus:ring-brand-accent/15 transition-all"
+                />
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-brand-muted mb-1.5 uppercase tracking-wide">
               Email
@@ -151,6 +231,25 @@ function LoginForm() {
               : (mode === 'login' ? 'Sign in' : 'Create account')}
           </button>
         </form>
+
+        {pendingEmail && (
+          <div className="mt-4 bg-brand-surface border border-brand-border rounded-2xl px-6 py-5 space-y-2 text-center">
+            <p className="text-xs text-brand-muted">
+              Didn&apos;t get the email for <span className="text-brand-text">{pendingEmail}</span>?
+            </p>
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resendCooldown > 0}
+              className="w-full py-2 text-sm font-medium text-brand-text bg-brand-raised hover:bg-brand-raised/80 disabled:opacity-40 disabled:cursor-not-allowed border border-brand-border/50 rounded-lg transition-colors"
+            >
+              {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend confirmation email'}
+            </button>
+            {resendStatus && (
+              <p className="text-xs text-brand-muted pt-1">{resendStatus}</p>
+            )}
+          </div>
+        )}
       </div>
     </main>
   )

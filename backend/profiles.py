@@ -39,8 +39,25 @@ async def upsert_profile(user_id: str, updates: dict) -> dict:
     return result.data[0]
 
 
-async def complete_onboarding(user_id: str, data: dict) -> dict:
+async def complete_onboarding(
+    user_id: str, data: dict, email: str | None = None
+) -> dict:
     data["onboarding_complete"] = True
+    # Auto-derive display_name from first/last name when provided
+    if data.get("first_name") and not data.get("display_name"):
+        parts = [data.get("first_name", ""), data.get("last_name", "")]
+        data["display_name"] = " ".join(p for p in parts if p).strip()
+    # display_name is NOT NULL on user_profiles, so the upsert must always
+    # carry one. Prefer the existing row's value, then email prefix, then a
+    # generic fallback.
+    if not data.get("display_name"):
+        existing = await get_profile(user_id)
+        if existing and existing.get("display_name"):
+            data["display_name"] = existing["display_name"]
+        elif email:
+            data["display_name"] = email.split("@")[0]
+        else:
+            data["display_name"] = "Physician"
     return await upsert_profile(user_id, data)
 
 

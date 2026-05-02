@@ -1,6 +1,7 @@
 import type {
   SSEEvent, Conversation, ChatMessage,
   PhysicianProfile, Post, Comment, DiscoverUser, LikeResponse, PostType,
+  Survey, SurveyAnswerInput, SurveyResults, SurveyStatus,
 } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -279,4 +280,46 @@ export async function discoverUsers(
   if (params?.limit) qs.set('limit', String(params.limit))
   if (params?.offset) qs.set('offset', String(params.offset))
   return apiFetch(`/discover/users?${qs}`, token)
+}
+
+// ---------------------------------------------------------------------------
+// Surveys
+// ---------------------------------------------------------------------------
+
+export async function fetchSurveys(token: string): Promise<Survey[]> {
+  return apiFetch('/surveys', token)
+}
+
+export async function fetchSurvey(surveyId: string, token: string): Promise<Survey> {
+  return apiFetch(`/surveys/${surveyId}`, token)
+}
+
+export async function createSurvey(data: object, token: string): Promise<Survey> {
+  return apiFetch('/surveys', token, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function updateSurveyStatus(
+  surveyId: string,
+  status: SurveyStatus,
+  token: string,
+): Promise<void> {
+  return apiFetch(`/surveys/${surveyId}/status`, token, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export async function submitSurveyResponse(
+  surveyId: string,
+  answers: SurveyAnswerInput[],
+  token: string,
+): Promise<{ response_id: string }> {
+  return apiFetch(`/surveys/${surveyId}/responses`, token, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+  })
+}
+
+export async function fetchSurveyResults(surveyId: string, token: string): Promise<SurveyResults> {
+  return apiFetch(`/surveys/${surveyId}/results`, token)
 }

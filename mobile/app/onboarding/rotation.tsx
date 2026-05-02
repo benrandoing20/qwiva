@@ -86,10 +86,11 @@ export default function RotationScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No authenticated user.');
-      const { error: upsertError } = await supabase
-        .from('profiles')
-        .upsert({ id: session.user.id, current_rotation: selected });
-      if (upsertError) throw new Error(upsertError.message);
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ current_rotation: selected })
+        .eq('user_id', session.user.id);
+      if (updateError) throw new Error(updateError.message);
       successHaptic();
       router.replace('/(tabs)/ask');
     } catch (e: unknown) {

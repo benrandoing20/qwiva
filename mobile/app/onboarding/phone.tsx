@@ -125,10 +125,11 @@ export default function PhoneScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { error: upsertError } = await supabase
-          .from('profiles')
-          .upsert({ id: user.id, phone: fullPhone });
-        if (upsertError) throw new Error(upsertError.message);
+        const { error: updateError } = await supabase
+          .from('user_profiles')
+          .update({ phone: fullPhone })
+          .eq('user_id', user.id);
+        if (updateError) throw new Error(updateError.message);
       }
       successHaptic();
       router.push('/onboarding/verify');

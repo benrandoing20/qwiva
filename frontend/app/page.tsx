@@ -489,8 +489,8 @@ export default function HomePage() {
   const showHero = !hasMessages && !activeConversationId && !isLoadingConversation
 
   return (
-    <div className="flex flex-col h-screen bg-brand-bg">
-      <Navbar onToggleSidebar={() => setSidebarOpen(v => !v)} />
+    <div className="flex flex-col h-dvh bg-brand-bg">
+      <Navbar onToggleSidebar={() => setSidebarOpen(v => !v)} onNewChat={handleNew} />
 
       {/* Below navbar: sidebar + chat area */}
       <div className="flex flex-1 overflow-hidden pt-14">

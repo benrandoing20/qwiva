@@ -111,9 +111,9 @@ export default function SpecialtyScreen() {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) { router.replace('/onboarding'); return; }
         const { data, error: fetchError } = await supabase
-          .from('profiles')
+          .from('user_profiles')
           .select('cadre')
-          .eq('id', session.user.id)
+          .eq('user_id', session.user.id)
           .single();
         if (fetchError) throw new Error(fetchError.message);
         if (data?.cadre === 'Intern') { router.replace('/(tabs)/ask'); return; }
@@ -147,10 +147,11 @@ export default function SpecialtyScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No authenticated user.');
-      const { error: upsertError } = await supabase
-        .from('profiles')
-        .upsert({ id: session.user.id, specialties: selected });
-      if (upsertError) throw new Error(upsertError.message);
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ specialties: selected })
+        .eq('user_id', session.user.id);
+      if (updateError) throw new Error(updateError.message);
       successHaptic();
       router.replace('/(tabs)/ask');
     } catch (e: unknown) {

@@ -1,14 +1,19 @@
+// All Fonts.* tokens point at Plus Jakarta Sans weights to match the web app
+// (frontend uses Plus_Jakarta_Sans via next/font/google). Token names are kept
+// stable so existing components don't need to change — only the underlying
+// font swaps. Italics fall back to the bold variant since Plus Jakarta does
+// not ship a regular italic in the @expo-google-fonts package.
 export const Fonts = {
-  display: 'Lora_700Bold',
-  displayMedium: 'Lora_600SemiBold',
-  displayItalic: 'Lora_400Regular_Italic',
-  sans: 'Gotham-Book',
-  sansMedium: 'Gotham-Medium',
-  sansBold: 'Gotham-Bold',
-  sansBlack: 'Gotham-Black',
-  mono: 'JetBrainsMono_400Regular',
-  gilroyLight: 'Gilroy-Light',
-  gilroySemiBold: 'Gilroy-SemiBold',
+  display: 'PlusJakartaSans_700Bold',
+  displayMedium: 'PlusJakartaSans_600SemiBold',
+  displayItalic: 'PlusJakartaSans_500Medium_Italic',
+  sans: 'PlusJakartaSans_400Regular',
+  sansMedium: 'PlusJakartaSans_500Medium',
+  sansBold: 'PlusJakartaSans_700Bold',
+  sansBlack: 'PlusJakartaSans_800ExtraBold',
+  mono: 'PlusJakartaSans_400Regular',
+  gilroyLight: 'PlusJakartaSans_300Light',
+  gilroySemiBold: 'PlusJakartaSans_600SemiBold',
 } as const;
 
 export const FontSizes = {

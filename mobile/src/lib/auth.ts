@@ -64,14 +64,14 @@ export async function signInWithGoogle(): Promise<SignInResult> {
 
     if (firstName || lastName) {
       const { error: upsertError } = await supabase
-        .from('profiles')
+        .from('user_profiles')
         .upsert(
           {
-            id: user.id,
+            user_id: user.id,
             first_name: firstName || null,
             last_name: lastName || null,
           },
-          { onConflict: 'id' }
+          { onConflict: 'user_id' }
         );
 
       if (upsertError) {

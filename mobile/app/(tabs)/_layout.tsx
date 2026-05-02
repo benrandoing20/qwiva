@@ -1,64 +1,63 @@
 import { Tabs } from 'expo-router';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { Sparkles, Newspaper, GraduationCap, BarChart3, User } from 'lucide-react-native';
-import { Colors, Fonts } from '../../src/constants';
+import { Fonts } from '@/constants';
+import { useTheme } from '@/hooks/useTheme';
 import { BlurView } from 'expo-blur';
 
-function TabIcon({ Icon, label, focused }: { Icon: any; label: string; focused: boolean }) {
+interface TabLabelProps {
+  label: string;
+  focused: boolean;
+}
+
+function TabLabel({ label, focused }: TabLabelProps) {
+  const theme = useTheme();
   return (
-    <View style={styles.tabItem}>
-      <Icon size={22} color={focused ? Colors.navy : Colors.textMuted} strokeWidth={focused ? 2 : 1.75} />
-      <Text style={[styles.tabLabel, focused ? styles.tabLabelActive : styles.tabLabelInactive]}>
-        {label}
-      </Text>
-    </View>
+    <Text
+      style={[
+        styles.tabLabel,
+        { color: focused ? theme.text : theme.textMuted },
+        focused && styles.tabLabelActive,
+      ]}
+    >
+      {label}
+    </Text>
   );
 }
 
 export default function TabLayout() {
+  const theme = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarBackground: () => (
+        tabBarStyle: [styles.tabBar, { borderTopColor: theme.border }],
+        tabBarBackground: () =>
           Platform.OS === 'ios' ? (
-            <BlurView intensity={60} style={StyleSheet.absoluteFill} tint="light" />
+            <BlurView
+              intensity={60}
+              style={StyleSheet.absoluteFill}
+              tint={theme.scheme === 'dark' ? 'dark' : 'light'}
+            />
           ) : (
-            <View style={[StyleSheet.absoluteFill, styles.tabBarBg]} />
-          )
-        ),
-        tabBarShowLabel: false,
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: theme.surface, opacity: 0.95 }]}
+            />
+          ),
+        tabBarShowLabel: true,
+        tabBarItemStyle: styles.tabItem,
+        tabBarIconStyle: { display: 'none' },
       }}
     >
       <Tabs.Screen
         name="ask"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon Icon={Sparkles} label="Ask" focused={focused} />,
-        }}
-      />
-      <Tabs.Screen
-        name="feed"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon Icon={Newspaper} label="Feed" focused={focused} />,
-        }}
-      />
-      <Tabs.Screen
-        name="learn"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon Icon={GraduationCap} label="Learn" focused={focused} />,
-        }}
-      />
-      <Tabs.Screen
-        name="pulse"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon Icon={BarChart3} label="Pulse" focused={focused} />,
+          tabBarLabel: ({ focused }) => <TabLabel label="Ask" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="me"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon Icon={User} label="Me" focused={focused} />,
+          tabBarLabel: ({ focused }) => <TabLabel label="Me" focused={focused} />,
         }}
       />
     </Tabs>
@@ -69,25 +68,22 @@ const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(226,226,236,0.6)',
     height: 72,
     paddingBottom: 0,
     backgroundColor: 'transparent',
     elevation: 0,
   },
-  tabBarBg: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
-  },
   tabItem: {
     alignItems: 'center',
-    gap: 4,
-    paddingTop: 6,
+    justifyContent: 'center',
+    paddingTop: 0,
   },
   tabLabel: {
-    fontSize: 10,
-    letterSpacing: 0.2,
+    fontSize: 14,
+    letterSpacing: -0.1,
     fontFamily: Fonts.sansMedium,
   },
-  tabLabelActive: { color: Colors.navy, fontFamily: Fonts.sansBold },
-  tabLabelInactive: { color: Colors.textMuted },
+  tabLabelActive: {
+    fontFamily: Fonts.sansBold,
+  },
 });

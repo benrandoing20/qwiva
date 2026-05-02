@@ -9,6 +9,7 @@ import Navbar from '@/components/Navbar'
 import PostCard from '@/components/PostCard'
 import SpecialtyBadge from '@/components/SpecialtyBadge'
 import FollowButton from '@/components/FollowButton'
+import EditProfilePanel from '@/components/EditProfilePanel'
 import type { PhysicianProfile, Post } from '@/types'
 
 export default function ProfilePage() {
@@ -23,6 +24,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
   const [postsLoading, setPostsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'posts' | 'about'>('posts')
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -124,12 +126,13 @@ export default function ProfilePage() {
             </div>
             <div className="flex-shrink-0 flex flex-col items-end gap-2">
               {isOwnProfile ? (
-                <Link
-                  href="/onboarding"
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
                   className="text-xs px-3 py-1.5 border border-brand-border rounded-lg text-brand-muted hover:text-brand-text transition-colors"
                 >
                   Edit profile
-                </Link>
+                </button>
               ) : (
                 profile.is_following !== null && token && (
                   <FollowButton
@@ -237,6 +240,16 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {isOwnProfile && profile && token && (
+        <EditProfilePanel
+          open={editing}
+          onClose={() => setEditing(false)}
+          profile={profile}
+          token={token}
+          onSaved={(p) => setProfile(p)}
+        />
+      )}
     </div>
   )
 }

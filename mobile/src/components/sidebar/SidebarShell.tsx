@@ -12,7 +12,7 @@ import Animated, {
   interpolate,
   Extrapolation,
 } from 'react-native-reanimated';
-import { Colors } from '@/constants';
+import { useTheme } from '@/hooks/useTheme';
 import { Sidebar } from './Sidebar';
 import { SidebarContextValue, SidebarShellProps } from './types';
 
@@ -39,6 +39,7 @@ const SPRING_CONFIG = {
 };
 
 export function SidebarShell({ children }: SidebarShellProps) {
+  const theme = useTheme();
   const panelX = useSharedValue(0);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -138,7 +139,7 @@ export function SidebarShell({ children }: SidebarShellProps) {
 
   return (
     <SidebarContext.Provider value={ctxValue}>
-      <View style={styles.root}>
+      <View style={[styles.root, { backgroundColor: theme.elevated }]}>
         {/* Layer 1: fixed sidebar (never moves) */}
         <View style={styles.sidebarLayer}>
           <Sidebar onItemPress={handleItemPress} />
@@ -146,8 +147,12 @@ export function SidebarShell({ children }: SidebarShellProps) {
 
         {/* Layer 2: draggable panel — outer wraps shadow, inner clips radius */}
         <GestureDetector gesture={panGesture}>
-          <Animated.View style={[styles.panelOuter, panelOuterStyle]}>
-            <Animated.View style={[styles.panelInner, panelInnerStyle]}>
+          <Animated.View
+            style={[styles.panelOuter, { shadowColor: theme.navy }, panelOuterStyle]}
+          >
+            <Animated.View
+              style={[styles.panelInner, { backgroundColor: theme.bg }, panelInnerStyle]}
+            >
               {children}
               {isOpen && (
                 <Pressable
@@ -166,7 +171,6 @@ export function SidebarShell({ children }: SidebarShellProps) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.bgSidebar,
     overflow: 'hidden',
   },
   sidebarLayer: {
@@ -175,14 +179,12 @@ const styles = StyleSheet.create({
   panelOuter: {
     ...StyleSheet.absoluteFillObject,
     transformOrigin: 'left center',
-    shadowColor: Colors.navy,
     shadowOffset: { width: -12, height: 0 },
     shadowRadius: 36,
     elevation: 8,
   },
   panelInner: {
     flex: 1,
-    backgroundColor: Colors.bgBase,
     overflow: 'hidden',
     borderCurve: 'continuous',
   },

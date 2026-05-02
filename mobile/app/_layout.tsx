@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useQwivaFonts } from '../src/hooks/useFonts';
 import { supabase } from '../src/lib/supabase';
 import { handleDeepLink } from '../src/lib/deepLinks';
+import { ThemeProvider, useThemeMode } from '../src/contexts/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -21,7 +22,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') router.replace('/onboarding');
+      if (event === 'SIGNED_OUT') router.replace('/onboarding/login');
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -56,13 +57,24 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="dark" />
+      <ThemeProvider>
+        <ThemedShell />
+      </ThemeProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function ThemedShell() {
+  const { scheme } = useThemeMode();
+  return (
+    <>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="case" options={{ presentation: 'card' }} />
       </Stack>
-    </GestureHandlerRootView>
+    </>
   );
 }

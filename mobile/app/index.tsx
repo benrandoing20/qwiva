@@ -7,7 +7,7 @@ export default function Index() {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
-        router.replace('/onboarding');
+        router.replace('/onboarding/login');
         return;
       }
       const route = await getPostAuthRoute(session.user.id);

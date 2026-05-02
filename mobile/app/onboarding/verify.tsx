@@ -92,10 +92,11 @@ export default function VerifyScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No authenticated user.');
-      const { error: upsertError } = await supabase
-        .from('profiles')
-        .upsert({ id: user.id, cadre, registration_number: regNumber.trim() });
-      if (upsertError) throw new Error(upsertError.message);
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ cadre, registration_number: regNumber.trim() })
+        .eq('user_id', user.id);
+      if (updateError) throw new Error(updateError.message);
       successHaptic();
       if (cadre === 'Intern') {
         router.push('/onboarding/rotation');
